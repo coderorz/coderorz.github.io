@@ -528,7 +528,8 @@ template<typename obj> class obj_pool
 		struct node<elem>*	m_pnodenext;
 	};
 public:
-	int m_pagesize; /*volatile long m_nadd;volatile long m_nnodecount;*/
+	int m_pagesize; /*volatile long m_nadd;*/
+	volatile long m_nnodecount;
 	volatile long m_newnodelock;
 	volatile unsigned int m_nsize;
 	struct node<obj>* m_pnodehead;
@@ -536,10 +537,11 @@ public:
 	obj* m_pobj;
 	volatile long m_nobjlock;
 public:
-	obj_pool(int inodecount = 3, int ipagesize = 1024 * 8)
-		:m_pagesize(ipagesize), /*m_nadd(0),m_nnodecount(inodecount),*/ m_newnodelock(0), m_nsize(0), m_pnodehead(0), m_pnodetail(0), m_pobj(0), m_nobjlock(0)
+	obj_pool(int inodecount = 10, int ipagesize = 1024 * 8)
+		:m_pagesize(ipagesize), /*m_nadd(0),*/m_nnodecount(inodecount), m_newnodelock(0), m_nsize(0), m_pnodehead(0), m_pnodetail(0), m_pobj(0), m_nobjlock(0)
 	{
-		for(int i = 0; i < inodecount; ++i){
+		for(int i = 0; i < m_nnodecount; ++i)
+		{
 			unsigned int iobjcount = 0;
 			struct node<obj>* pnode = new_node(iobjcount, m_pagesize);
 			if(!pnode){continue;}
@@ -550,100 +552,116 @@ public:
 				pnode->m_pnodenext = m_pnodehead, m_pnodehead = pnode;
 			}
 			m_nsize += iobjcount;
-			m_pnodetail->m_pnodenext = m_pnodehead;//loop list
 		}
+		m_pnodetail->m_pnodenext = m_pnodehead;
 		m_pobj = newobj();
 	}
 	virtual ~obj_pool(void)
 	{
-		int i = 0;
-		m_pnodetail = m_pnodehead;	m_pnodehead = m_pnodehead->m_pnodenext;	m_pnodetail->m_pnodenext = 0;
-		while(m_pnodehead){
+		m_pnodetail->m_pnodenext = 0;
+		while(m_pnodehead)
+		{
 			char* pdel = (char*)m_pnodehead;
 			m_pnodehead = m_pnodehead->m_pnodenext;
 			if(pdel){delete pdel, pdel = 0;}
-			++i;
 		}
-		//printf("nodecount = %d, pagesize = %d, add = %d, size = %d\n", i, m_pagesize, m_nadd, m_nsize);
+		m_pnodehead = m_pnodetail = 0;
 	}
 public:
 	obj* newobj(void)
 	{
-		if(m_pobj)
-		{
-			if(cb_lockcompareexchange(m_nobjlock, 1, 0) == 0)
-			{
-				if(m_pobj)
-				{
-					obj* p = m_pobj;
-					m_pobj = 0;
-					cb_lockexchange(m_nobjlock, 0);
-					return p;
-				}
-				cb_lockexchange(m_nobjlock, 0);
-			}
-		}
 		struct node<obj>* phead = m_pnodehead;
 		while(1)
 		{
+			if(m_pobj)//temp
+			{
+				if(cb_lockcompareexchange(m_nobjlock, 1, 0) == 0)
+				{
+					if(m_pobj)
+					{
+						obj* p = m_pobj;
+						m_pobj = 0;
+						cb_lockexchange(m_nobjlock, 0);
+						return p;
+					}
+					cb_lockexchange(m_nobjlock, 0);
+				}
+			}
 			if(cb_lockcompareexchange(phead->m_nlock, 1, 0) == 0)
 			{
-				if(phead->m_pelemhead){
+				cb_lockexsub(m_nnodecount, 1);
+				if(phead->m_pelemhead)
+				{
 					obj* pelem = phead->m_pelemhead;
 					memcpy(&phead->m_pelemhead, pelem, sizeof(obj*));
 					cb_lockexsub(m_nsize, 1);
 					cb_lockexchange(phead->m_nlock, 0);
+					cb_lockexadd(m_nnodecount, 1);
 					return pelem;
 				}
 				cb_lockexchange(phead->m_nlock, 0);
-				if(cb_lockexadd(m_nsize, 0) < 100)
+				cb_lockexadd(m_nnodecount, 1);
+			}
+			unsigned long nnodecount = cb_lockexadd(m_nnodecount, 0);
+			if(cb_lockexadd(m_nsize, 0) < nnodecount || nnodecount < 1)
+			{
+				if(cb_lockcompareexchange(m_newnodelock, 1, 0) == 0)
 				{
-					if(cb_lockcompareexchange(m_newnodelock, 1, 0) == 0)
+					if(cb_lockexadd(m_nsize, 0) > (nnodecount << 1))
 					{
-						if(cb_lockexadd(m_nsize, 0) > 100){
-							cb_lockexchange(m_newnodelock, 0);
-							phead = m_pnodehead;
-							cb_sleep(1);
-							continue;
-						}
-						unsigned int iobjcount = 0;
-						struct node<obj>* pnode = new_node(iobjcount, m_pagesize);
-						if(pnode)
-						{
-							obj* pelem = pnode->m_pelemhead;
-							memcpy(&pnode->m_pelemhead, pelem, sizeof(obj*));
-							while(cb_lockcompareexchange(m_pnodetail->m_nlock, 1, 0) == 1);
-							pnode->m_pnodenext = m_pnodetail->m_pnodenext;
-							m_pnodetail->m_pnodenext = pnode;
-							m_pnodetail = pnode;
-							cb_lockexadd(m_nsize, iobjcount);
-							cb_lockexchange(m_pnodetail->m_nlock, 0);
-							m_pnodehead = m_pnodetail;
-							//cb_lockexadd(m_nadd, 1);
-							//cb_lockexadd(m_nnodecount, 1);
-							cb_lockexchange(m_newnodelock, 0);
-							//printf("node[%d], elem[%d],addnode[%d]\n", m_nnodecount, m_nsize, m_nadd);
-							return pelem;
-						}
-						else{
-							cb_lockexchange(m_newnodelock, 0);
-							return 0;
-						}
+						cb_lockexchange(m_newnodelock, 0);
+						phead = m_pnodetail; continue;
 					}
-					phead = m_pnodehead;
-					cb_sleep(1);
-					continue;
+					unsigned int iobjcount = 0;
+					struct node<obj>* pnode = new_node(iobjcount, m_pagesize);
+					if(pnode)
+					{
+						obj* pelem = pnode->m_pelemhead;
+						memcpy(&pnode->m_pelemhead, pelem, sizeof(obj*));
+						while(cb_lockcompareexchange(m_pnodetail->m_nlock, 1, 0) == 1);
+						pnode->m_pnodenext = m_pnodetail->m_pnodenext;
+						m_pnodetail->m_pnodenext = pnode;
+						cb_lockexadd(m_nsize, iobjcount - 1);
+						struct node<obj>* ptail = m_pnodetail;
+						m_pnodetail = pnode;
+						cb_lockexchange(ptail->m_nlock, 0);
+						cb_lockexadd(m_nnodecount, 1);
+						cb_lockexchange(m_newnodelock, 0);
+						return pelem;
+					}
+					else{
+						cb_lockexchange(m_newnodelock, 0);
+						return 0;
+					}
+				}
+				else{
+					int ilen = sizeof(obj) + sizeof(struct node<obj>*);
+					char* p = new(std::nothrow) char[ilen];
+					if(!p){
+						return 0;
+					}
+					memset(p, 0, ilen);
+					return (obj*)(p + sizeof(struct node<obj>*));
 				}
 			}
-			phead = phead->m_pnodenext;
-			cb_sleep(1);
+			else{
+				phead = phead->m_pnodenext;
+			}
 		}
 	}
 	void delobj(void* p)
 	{
-		if(!p){return ;}
-		if(!m_pobj){
-			if(cb_lockcompareexchange(m_nobjlock, 1, 0) == 0){
+		if(!p) return ;
+		struct node<obj>* pnode = 0;
+		memcpy(&pnode, (char*)p - sizeof(struct node<obj>*), sizeof(struct node<obj>*));
+		if(!pnode){
+			delete ((char*)p - sizeof(struct node<obj>*)), p = 0;
+			return ;
+		}
+		if(!m_pobj)
+		{
+			if(cb_lockcompareexchange(m_nobjlock, 1, 0) == 0)
+			{
 				if(!m_pobj){
 					m_pobj = (obj*)p;
 					cb_lockexchange(m_nobjlock, 0);
@@ -652,8 +670,6 @@ public:
 				cb_lockexchange(m_nobjlock, 0);
 			}
 		}
-		struct node<obj>* pnode = 0;
-		memcpy(&pnode, (char*)p - sizeof(struct node<obj>*), sizeof(struct node<obj>*));
 		while(cb_lockcompareexchange(pnode->m_nlock, 1, 0) == 1);
 		memcpy(p, &pnode->m_pelemhead, sizeof(obj*));
 		pnode->m_pelemhead = (obj*)p;
