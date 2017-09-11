@@ -13,7 +13,7 @@ inline void swap (float &a, float &b)
 }
 void bitrp (float xreal [], float ximag [], int n)
 {
-	// Œª∑¥◊™÷√ªª Bit-reversal Permutation
+	// ‰ΩçÂèçËΩ¨ÁΩÆÊç¢ Bit-reversal Permutation
 	int i, j, a, b, p;
 	for (i = 1, p = 0; i < n; i *= 2)
 	{
@@ -37,10 +37,10 @@ void bitrp (float xreal [], float ximag [], int n)
 }
 void FFT(float xreal [], float ximag [], int n)
 {
-	// øÏÀŸ∏µ¡¢“∂±‰ªª£¨Ω´∏¥ ˝ x ±‰ªª∫Û»‘±£¥Ê‘⁄ x ÷–£¨xreal, ximag ∑÷± « x µƒ µ≤ø∫Õ–È≤ø
+	// Âø´ÈÄüÂÇÖÁ´ãÂè∂ÂèòÊç¢ÔºåÂ∞ÜÂ§çÊï∞ x ÂèòÊç¢Âêé‰ªç‰øùÂ≠òÂú® x ‰∏≠Ôºåxreal, ximag ÂàÜÂà´ÊòØ x ÁöÑÂÆûÈÉ®ÂíåËôöÈÉ®
 	float wreal [N / 2], wimag [N / 2], treal, timag, ureal, uimag, arg;
 	int m, k, j, t, index1, index2;
-	bitrp (xreal, ximag, n);// º∆À„ 1 µƒ«∞ n / 2 ∏ˆ n ¥Œ∑Ω∏˘µƒπ≤ÈÓ∏¥ ˝ W'j = wreal [j] + i * wimag [j] , j = 0, 1,   , n / 2 - 1
+	bitrp (xreal, ximag, n);// ËÆ°ÁÆó 1 ÁöÑÂâç n / 2 ‰∏™ n Ê¨°ÊñπÊ†πÁöÑÂÖ±ËΩ≠Â§çÊï∞ W'j = wreal [j] + i * wimag [j] , j = 0, 1,   , n / 2 - 1
 	arg = - 2 * PI / n;
 	treal = cos (arg);
 	timag = sin (arg);
@@ -59,7 +59,7 @@ void FFT(float xreal [], float ximag [], int n)
 			{
 				index1 = k + j;
 				index2 = index1 + m / 2;
-				t = n * j / m;// –˝◊™“Ú◊” w µƒ µ≤ø‘⁄ wreal [] ÷–µƒœ¬±ÍŒ™ t
+				t = n * j / m;// ÊóãËΩ¨Âõ†Â≠ê w ÁöÑÂÆûÈÉ®Âú® wreal [] ‰∏≠ÁöÑ‰∏ãÊ†á‰∏∫ t
 				treal = wreal [t] * xreal [index2] - wimag [t] * ximag [index2];
 				timag = wreal [t] * ximag [index2] + wimag [t] * xreal [index2];
 				ureal = xreal [index1];
@@ -74,10 +74,10 @@ void FFT(float xreal [], float ximag [], int n)
 }
 void IFFT (float xreal [], float ximag [], int n) 
 {
-	// øÏÀŸ∏µ¡¢“∂ƒÊ±‰ªª
+	// Âø´ÈÄüÂÇÖÁ´ãÂè∂ÈÄÜÂèòÊç¢
 	float wreal [N / 2], wimag [N / 2], treal, timag, ureal, uimag, arg;
 	int m, k, j, t, index1, index2;
-	bitrp (xreal, ximag, n); // º∆À„ 1 µƒ«∞ n / 2 ∏ˆ n ¥Œ∑Ω∏˘ Wj = wreal [j] + i * wimag [j] , j = 0, 1,   , n / 2 - 1 
+	bitrp (xreal, ximag, n); // ËÆ°ÁÆó 1 ÁöÑÂâç n / 2 ‰∏™ n Ê¨°ÊñπÊ†π Wj = wreal [j] + i * wimag [j] , j = 0, 1,   , n / 2 - 1 
 	arg = 2 * PI / n;
 	treal = cos (arg);
 	timag = sin (arg);
@@ -96,7 +96,7 @@ void IFFT (float xreal [], float ximag [], int n)
 			{
 				index1 = k + j;
 				index2 = index1 + m / 2;
-				t = n * j / m;// –˝◊™“Ú◊” w µƒ µ≤ø‘⁄ wreal [] ÷–µƒœ¬±ÍŒ™ t
+				t = n * j / m;// ÊóãËΩ¨Âõ†Â≠ê w ÁöÑÂÆûÈÉ®Âú® wreal [] ‰∏≠ÁöÑ‰∏ãÊ†á‰∏∫ t
 				treal = wreal [t] * xreal [index2] - wimag [t] * ximag [index2];
 				timag = wreal [t] * ximag [index2] + wimag [t] * xreal [index2];
 				ureal = xreal [index1];
@@ -116,8 +116,8 @@ void IFFT (float xreal [], float ximag [], int n)
 }
 void FFT_test ()
 {
-	char inputfile [] = "input.txt";// ¥”Œƒº˛ input.txt ÷–∂¡»Î‘≠ º ˝æ›
-	char outputfile [] = "output.txt";// Ω´Ω·π˚ ‰≥ˆµΩŒƒº˛ output.txt ÷–
+	char inputfile [] = "input.txt";// ‰ªéÊñá‰ª∂ input.txt ‰∏≠ËØªÂÖ•ÂéüÂßãÊï∞ÊçÆ
+	char outputfile [] = "output.txt";// Â∞ÜÁªìÊûúËæìÂá∫Âà∞Êñá‰ª∂ output.txt ‰∏≠
 	float xreal [N] = {}, ximag [N] = {};
 	int n, i;
 	FILE *input, *output;
@@ -136,7 +136,7 @@ void FFT_test ()
 	{
 		i ++;
 	}
-	n = i;// “™«Û n Œ™ 2 µƒ’˚ ˝√›
+	n = i;// Ë¶ÅÊ±Ç n ‰∏∫ 2 ÁöÑÊï¥Êï∞ÂπÇ
 	while (i > 1)
 	{
 		if(i % 2)
@@ -170,3 +170,60 @@ void FFT_test ()
 		exit (1);
 	}
 }
+
+input.txt
+0.5751          0
+0.4514          0
+0.0439          0
+0.0272          0
+0.3127          0
+0.0129          0
+0.3840          0
+0.6831          0
+0.0928          0
+0.0353          0
+0.6124          0
+0.6085          0
+0.0158          0
+0.0164          0
+0.1901          0
+0.5869          0
+
+
+output.txt
+FFT:     
+ i        real         imag 
+ 0       4.6485       0.0000 
+ 1       0.0176       0.3122 
+ 2       1.1114       0.0429 
+ 3       1.6776      -0.1353 
+ 4      -0.2340       1.3897 
+ 5       0.3652      -1.2589 
+ 6      -0.4325       0.2073 
+ 7      -0.1312       0.3763 
+ 8      -0.1949       0.0000 
+ 9      -0.1312      -0.3763 
+10      -0.4326      -0.2073 
+11       0.3652       1.2589 
+12      -0.2340      -1.3897 
+13       1.6776       0.1353 
+14       1.1113      -0.0429 
+15       0.0176      -0.3122 
+================================= IFFT:     
+i      real         imag 
+   0       0.5751      -0.0000 
+   1       0.4514       0.0000 
+   2       0.0439      -0.0000 
+   3       0.0272      -0.0000 
+   4       0.3127      -0.0000 
+   5       0.0129      -0.0000 
+   6       0.3840      -0.0000 
+   7       0.6831       0.0000 
+   8       0.0928       0.0000 
+   9       0.0353      -0.0000 
+  10       0.6124       0.0000 
+  11       0.6085       0.0000 
+  12       0.0158       0.0000 
+  13       0.0164       0.0000 
+  14       0.1901       0.0000 
+  15       0.5869      -0.0000 
