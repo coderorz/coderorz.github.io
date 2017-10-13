@@ -36,6 +36,7 @@ typedef void* (*pvoid_proc_pvoid)(void*);
 //////////////////////////////////public////////////////////////////////////////
 
 //////////////////////////////////log///////////////////////////////////////////
+//cb_log(0, "chenbo", "err", 0, 0, "%d %d", 0, 0);
 #ifdef WIN32
 #define cb_time(timebuf,timebuflen) {SYSTEMTIME t; GetLocalTime(&t); \
 	cb_sprintf(timebuf, timebuflen, "%d:%02d:%d %02d:%02d:%02d,%03d", t.wYear,t.wMonth,t.wDay,t.wHour,t.wMinute,t.wSecond,t.wMilliseconds);}
@@ -186,6 +187,88 @@ namespace cb_space_publicfunc
 	class cb_staticfunc
 	{
 	public:
+		static void wstring2string(std::string& dest, const std::wstring& src)
+		{
+			if(src.length() <= 0)
+				return ;
+#ifdef WIN32
+			int ilen = ::WideCharToMultiByte(CP_ACP, 0, src.c_str(), -1, 0, 0, 0, 0) + 1;
+			char buf[4096] = {0}; char* p = buf;
+			if(ilen >= 4096)
+			{
+				p = new(std::nothrow) char[ilen];
+				if(!p)
+					return ;
+				memset(p, 0, ilen * sizeof(char));
+			}
+			::WideCharToMultiByte(CP_ACP, 0, src.c_str(), -1, p, ilen - 1, 0, 0);
+			dest = p;
+			if(p != buf)
+				delete []p, p = 0;
+			return ;
+#else
+			/*
+			std::string curlocale = setlocale(LC_ALL, 0); // curLocale = "C";
+			setlocale(LC_ALL, "chs");
+			size_t ilen = src.size() * sizeof(wchar_t) + 1;
+			char buf[4096] = {0}; char* p = buf;
+			if(ilen >= 4096)
+			{
+				p = new(std::nothrow) char[ilen];
+				if(!p)
+					goto lab_end;
+				memset(p, 0, ilen * sizeof(char));
+			}
+			wcstombs(p, src.c_str(), ilen);
+			dest = p;
+			if(p != buf)
+				delete []p, p = 0;
+lab_end:
+			setlocale(LC_ALL, curLocale.c_str());
+			*/
+#endif
+		}
+
+		static void string2wstring(std::wstring& dest, const std::string& src)
+		{
+			if(src.length() <= 0)
+				return ;
+#ifdef WIN32
+			int ilen = ::MultiByteToWideChar(CP_ACP, 0, src.c_str(), -1, 0, 0) + 1;
+			wchar_t buf[4096] = {0}; wchar_t* p = buf;
+			if(ilen >= 4096)
+			{
+				p = new(std::nothrow) wchar_t[ilen];
+				if(!p)
+					return ;
+				memset(p, 0, ilen * sizeof(wchar_t));
+			}
+			::MultiByteToWideChar(CP_ACP, 0, src.c_str(), -1, p, ilen - 1);
+			dest = p;
+			if(p != buf)
+				delete []p, p = 0;
+#else
+			/*
+			setlocale(LC_ALL, "chs");
+			size_t ilen = src.size() + 1;
+			char buf[4096] = {0}; char* p = buf;
+			if(ilen >= 4096)
+			{
+				p = new(std::nothrow) char[ilen];
+				if(!p)
+					return ;
+				memset(p, 0, ilen * sizeof(char));
+			}
+			mbstowcs(p, src.c_str(), ilen);
+			dest = p;
+			if(p != buf)
+				delete []p, p = 0;
+lab_end:
+			setlocale(LC_ALL, "C");
+			*/
+#endif
+		}
+
 		static int readfile(const char* filepath, char** pbuf, int& bufsize)
 		{
 			if(!filepath || em_fileexist(filepath)){
@@ -231,6 +314,7 @@ namespace cb_space_publicfunc
 			em_closef(f);
 			return iret;
 		}
+
 		static int writefile(const char* filepath, const char* pbuf, int bufsize)
 		{
 			if(!filepath || em_fileexist(filepath)){
@@ -256,6 +340,7 @@ namespace cb_space_publicfunc
 			em_closef(f);
 			return 0;
 		}
+
 		static int istextutf8(char* str, int istrlen)
 		{
 			unsigned long nbytes = 0;
@@ -280,25 +365,26 @@ namespace cb_space_publicfunc
 						else if(str[i] >= 0xC0)
 							nbytes = 2;
 						else
-							return 0;
+							return -1;
 						--nbytes;
 					}
 				}
 				else{
 					if((str[i] & 0xC0) != 0x80){
-						return 0;
+						return -2;
 					}
 					--nbytes;
 				}
 			}
 			if(nbytes > 0){
-				return 0;
+				return -3;
 			}
 			if(ballascii){
-				return 0;
+				return -4;
 			}
-			return 1;
+			return 0;
 		}
+
 	#ifdef WIN32
 		static int transcoding(std::string& out, const char* _in, unsigned int fromcodepage, unsigned int tocodepage)
 	#else
@@ -372,6 +458,31 @@ namespace cb_space_publicfunc
 			out = pcharbuf;
 			delete []pcharbuf, pcharbuf = 0;
 	#endif
+			return 0;
+		}
+
+		static int gettimeinfo(int& year, int& month, int& day, int& hour, int& minute, int& second, int& millisecond)
+		{
+			/*
+			int y, m, d, h, mi, s, ms;
+			cb_space_publicfunc::cb_staticfunc::gettimeinfo(y, m, d, h, mi, s, ms);
+			printf("%d-%02d-%02d %02d:%02d:%02d %03d\n", y, m, d, h, mi, s, ms);
+			*/
+#ifdef WIN32
+			SYSTEMTIME t;
+			GetLocalTime(&t);
+			year = t.wYear; month = t.wMonth; day = t.wDay;
+			hour = t.wHour; minute = t.wMinute; second = t.wSecond; millisecond = t.wMilliseconds;
+#else
+			struct timeval tv;
+			memset(&tv, 0, sizeof(timeval));
+			gettimeofday(&tv, NULL);
+			struct tm* time_ptr = localtime(&tv.tv_sec);
+			if(!time_ptr)
+				return -1;
+			year = time_ptr->tm_year + 1900; month = time_ptr->tm_mon + 1; day = time_ptr->tm_mday;
+			hour = time_ptr->tm_hour; minute = time_ptr->tm_min; second = time_ptr->tm_sec; millisecond = tv.tv_usec / 1000;
+#endif
 			return 0;
 		}
 	};
@@ -1717,7 +1828,8 @@ namespace cb_space_socket
 						if(0 == senddata(psendbuf, isendlen))
 						{
 							char head[1024] = {0}; char* phead = head;
-							if(iretheadsize > 1024){
+							if(iretheadsize > 1024)
+							{
 								phead = new(std::nothrow) char[iretheadsize];
 								if(!phead){
 									return -2;
@@ -3258,7 +3370,7 @@ namespace cb_space_algorithm
 		cb_space_algorithm::cb_base64 b64;
 
 		std::string penstr;
-		b64.base64_encode2(test, strlen(test), penstr);
+		b64.base64_encode(test, strlen(test), penstr);
 		printf("encoded base64: %d\n%s\n\n", penstr.length(), penstr.c_str());
 
 		char buf[4096] = {0}; char* p1 = buf;
@@ -3268,7 +3380,7 @@ namespace cb_space_algorithm
 			memset(p1, 0, idelen);
 			idelen = penstr.length();
 		}
-		char* pdestr = b64.base64_decode2(penstr.c_str(), penstr.length(), p1, idelen);
+		char* pdestr = b64.base64_decode(penstr.c_str(), penstr.length(), p1, idelen);
 		if(pdestr){
 			printf("decoded again: %d\n%s\n\n", idelen, pdestr);
 			if(pdestr != p1){
@@ -3280,7 +3392,7 @@ namespace cb_space_algorithm
 		cb_base64(){}
 		virtual ~cb_base64(){}
 	public:
-		void base64_encode2(const char* psrc, unsigned int isrclen, std::string& str)
+		void base64_encode(const char* psrc, unsigned int isrclen, std::string& str)
 		{
 			if(!psrc || isrclen <= 0)
 				return ;
@@ -3325,7 +3437,7 @@ namespace cb_space_algorithm
 			}
 			return ;
 		}
-		char* base64_decode2(const char* psrc, unsigned int isrclen, char* pdes, unsigned int& ideslen)
+		char* base64_decode(const char* psrc, unsigned int isrclen, char* pdes, unsigned int& ideslen)
 		{
 			int ch, i = 0, j = 0, k;
 			char* p = pdes;
