@@ -1,6 +1,6 @@
 #pragma once
-#ifndef __cb_em__
-#define __cb_em__
+#ifndef __cb_cb__
+#define __cb_cb__
 
 #ifdef WIN32
 #include <iostream>		//std::nothrow
@@ -92,31 +92,31 @@ typedef void* (*pvoid_proc_pvoid)(void*);
 //////////////////////////////////file//////////////////////////////////////////
 #ifdef WIN32
 #include <io.h>	//_access
-#define em_fileexist(filepath) !_access((filepath), 0) ? 0 : -1
-#define em_file	FILE*
-#define em_openf(f, filepath, mode) fopen_s(&f, filepath, mode)
-#define em_openf_succ(f) (f)
-#define em_fseek(f, offset, origin)	fseek((f), (offset), (origin))
-#define em_filesizetype	long
-#define em_fileend(filesize, f)	em_fseek((f), 0, SEEK_END);(filesize) = ftell((f));em_fseek((f), 0, SEEK_SET)
-#define em_read(f, pbuf, bufsize) fread(pbuf, 1, bufsize, (f))
-#define em_write(f, pbuf, bufsize) fwrite(pbuf, 1, bufsize, (f))
-#define em_closef(f) fclose((f))
-#define em_moderead "rb"
-#define em_modewrite "w+"
+#define cb_fileexist(filepath) !_access((filepath), 0) ? 0 : -1
+#define cb_file	FILE*
+#define cb_openf(f, filepath, mode) fopen_s(&f, filepath, mode)
+#define cb_openf_succ(f) (f)
+#define cb_fseek(f, offset, origin)	fseek((f), (offset), (origin))
+#define cb_filesizetype	long
+#define cb_fileend(filesize, f)	cb_fseek((f), 0, SEEK_END);(filesize) = ftell((f));cb_fseek((f), 0, SEEK_SET)
+#define cb_read(f, pbuf, bufsize) fread(pbuf, 1, bufsize, (f))
+#define cb_write(f, pbuf, bufsize) fwrite(pbuf, 1, bufsize, (f))
+#define cb_closef(f) fclose((f))
+#define cb_moderead "rb"
+#define cb_modewrite "w+"
 #else
-#define em_fileexist(filepath) (!access((filepath), F_OK)) ? 0 : -1
-#define em_file	int
-#define em_openf(f, filepath, mode) (f) = open(filepath, mode)
-#define em_openf_succ(openret) ((openret)!=-1)
-#define em_fseek(f, offset, origin)	lseek((f), (offset), (origin))
-#define em_filesizetype	off_t
-#define em_fileend(filesize, f)	filesize = lseek((f), 0, SEEK_END); lseek((f), 0, SEEK_SET)
-#define em_read(f, pbuf, bufsize) read((f), pbuf, bufsize)
-#define em_write(f, pbuf, bufsize) write((f), pbuf, bufsize)
-#define em_closef(f) close((f))
-#define em_moderead O_RDONLY
-#define em_modewrite O_RDWR|O_CREAT|O_TRUNC
+#define cb_fileexist(filepath) (!access((filepath), F_OK)) ? 0 : -1
+#define cb_file	int
+#define cb_openf(f, filepath, mode) (f) = open(filepath, mode)
+#define cb_openf_succ(openret) ((openret)!=-1)
+#define cb_fseek(f, offset, origin)	lseek((f), (offset), (origin))
+#define cb_filesizetype	off_t
+#define cb_fileend(filesize, f)	filesize = lseek((f), 0, SEEK_END); lseek((f), 0, SEEK_SET)
+#define cb_read(f, pbuf, bufsize) read((f), pbuf, bufsize)
+#define cb_write(f, pbuf, bufsize) write((f), pbuf, bufsize)
+#define cb_closef(f) close((f))
+#define cb_moderead O_RDONLY
+#define cb_modewrite O_RDWR|O_CREAT|O_TRUNC
 #endif
 //////////////////////////////////file//////////////////////////////////////////
 
@@ -271,27 +271,27 @@ lab_end:
 
 		static int readfile(const char* filepath, char** pbuf, int& bufsize)
 		{
-			if(!filepath || em_fileexist(filepath)){
+			if(!filepath || cb_fileexist(filepath)){
 				return -1;
 			}
-			em_file f; em_openf(f, filepath, em_moderead);
-			if(!em_openf_succ(f)){
+			cb_file f; cb_openf(f, filepath, cb_moderead);
+			if(!cb_openf_succ(f)){
 				return -2;
 			}
-			em_filesizetype filesize;
-			em_fileend(filesize, f);
+			cb_filesizetype filesize;
+			cb_fileend(filesize, f);
 			if(filesize == 0){
-				em_closef(f);
+				cb_closef(f);
 				return 0;
 			}
 			else if(filesize < 0){
-				em_closef(f);
+				cb_closef(f);
 				return -3;
 			}
 			if(bufsize < filesize){
 				*pbuf = new char[filesize];
 				if(!*pbuf){
-					em_closef(f);
+					cb_closef(f);
 					return -4;
 				}
 				memset(*pbuf, 0, filesize);
@@ -300,44 +300,44 @@ lab_end:
 			long nidx = filesize; int iret = 0;
 			while(filesize > 0)
 			{
-				if(em_fseek(f, (nidx - filesize), SEEK_SET)){
+				if(cb_fseek(f, (nidx - filesize), SEEK_SET)){
 					iret = 1;
 					break;
 				}
-				long icount = em_read(f, &(*pbuf)[nidx - filesize], filesize);
+				long icount = cb_read(f, &(*pbuf)[nidx - filesize], filesize);
 				if(icount <= 0){
 					iret = 2;
 					break;
 				}
 				filesize -= icount;
 			}
-			em_closef(f);
+			cb_closef(f);
 			return iret;
 		}
 
 		static int writefile(const char* filepath, const char* pbuf, int bufsize)
 		{
-			if(!filepath || em_fileexist(filepath)){
+			if(!filepath || cb_fileexist(filepath)){
 				return -1;
 			}
-			em_file f; em_openf(f, filepath, em_modewrite);
-			if(!em_openf_succ(f)){
+			cb_file f; cb_openf(f, filepath, cb_modewrite);
+			if(!cb_openf_succ(f)){
 				return -2;
 			}
 			long nidx(bufsize); int iret = 0;
 			while(bufsize > 0){
-				if(em_fseek(f, (nidx - bufsize), SEEK_SET)){
+				if(cb_fseek(f, (nidx - bufsize), SEEK_SET)){
 					iret = 1;
 					break;
 				}
-				long icount = (em_write(f, &pbuf[nidx - bufsize], bufsize));
+				long icount = (cb_write(f, &pbuf[nidx - bufsize], bufsize));
 				if(icount <= 0){
 					iret = 2;
 					break;
 				}
 				bufsize -= icount;
 			}
-			em_closef(f);
+			cb_closef(f);
 			return 0;
 		}
 
@@ -393,14 +393,14 @@ lab_end:
 		{
 			/*
 			#ifdef WIN32
-			#define em_codeconvert_value_read CP_UTF8, CP_ACP
-			#define em_codeconvert_value_write CP_ACP, CP_UTF8
+			#define cb_codeconvert_value_read CP_UTF8, CP_ACP
+			#define cb_codeconvert_value_write CP_ACP, CP_UTF8
 			#else
-			#define em_codeconvert_value_read "utf-8", "gbk"
-			#define em_codeconvert_value_write "gbk", "utf-8"
+			#define cb_codeconvert_value_read "utf-8", "gbk"
+			#define cb_codeconvert_value_write "gbk", "utf-8"
 			#endif
 
-			codeconvert(str, sText.c_str(), em_codeconvert_value_write);
+			codeconvert(str, sText.c_str(), cb_codeconvert_value_write);
 			*/
 			if(!_in || !*_in){
 				return -1;
@@ -490,12 +490,12 @@ lab_end:
 
 namespace cb_space_memorypool
 {
-	class mem_pool
+	class mcb_pool
 	{
-		struct mem_node
+		struct mcb_node
 		{
 		public:
-			mem_node():m_nlock(0), m_pmemhead(0), m_ntlock(0), m_pmemt(0), m_ielemsize(0), m_pblock(0), m_pnextnode(0){}
+			mcb_node():m_nlock(0), m_pmemhead(0), m_ntlock(0), m_pmemt(0), m_ielemsize(0), m_pblock(0), m_pnextnode(0){}
 		public:
 			volatile long m_nlock;			//连续内存单元锁
 			void* m_pmemhead;				//连续内存单元的第一个地址,每个单元头sizeof(void*)个字节内容指向下一个内存单元的地址
@@ -503,7 +503,7 @@ namespace cb_space_memorypool
 			void* m_pmemt;					//临时存储一个变量,可提高效率
 			unsigned int m_ielemsize;		//每个内存块的size
 			void* m_pblock;					//内存块地址,后sizeof(void*)个字节内容指向下一个内存块的地址,但是内存块都插入到m_pmemhead
-			mem_node* m_pnextnode;	//指向下个node
+			mcb_node* m_pnextnode;	//指向下个node
 		public:
 			void* new_mem(int iflag = 1)
 			{
@@ -601,7 +601,7 @@ namespace cb_space_memorypool
 				cb_lockexchange(m_nlock, 0);
 				return ;
 			}
-			void* new_elem(mem_node* pnode, unsigned int ielemcount = 1024, bool bnewelem = false, void** ptail = 0)
+			void* new_elem(mcb_node* pnode, unsigned int ielemcount = 1024, bool bnewelem = false, void** ptail = 0)
 			{
 				//bnewelem = false and ptail = 0, or ptail can not be 0
 				volatile static long lock = 0;
@@ -612,8 +612,8 @@ namespace cb_space_memorypool
 					char* p = new(std::nothrow)char[ielemsize + sizeof(void*)];
 					if(p)
 					{
-						memset(p, 0, sizeof(mem_node*));
-						p += sizeof(mem_node*);//0 flag for system delete
+						memset(p, 0, sizeof(mcb_node*));
+						p += sizeof(mcb_node*);//0 flag for system delete
 					}
 					cb_lockexchange(lock, 0);
 					return p;
@@ -631,15 +631,15 @@ namespace cb_space_memorypool
 				}
 				pnode->m_pblock = p;
 				p += sizeof(void*);
-				void* phead = p + sizeof(mem_node*);
+				void* phead = p + sizeof(mcb_node*);
 				while(1)
 				{
 					//node add
-					memcpy(p, &pnode, sizeof(mem_node*));
-					p += sizeof(mem_node*);
+					memcpy(p, &pnode, sizeof(mcb_node*));
+					p += sizeof(mcb_node*);
 					*ptail = p;//set last elem for insert list
 					//elemnext
-					char* pnext = p + ielemsize + sizeof(mem_node*);
+					char* pnext = p + ielemsize + sizeof(mcb_node*);
 					if(pnext + ielemsize > pend){
 						break;
 					}
@@ -652,7 +652,7 @@ namespace cb_space_memorypool
 			}
 		};
 	public:
-		mem_pool(void)
+		mcb_pool(void)
 			:m_pmemorydelhead(0), m_p__16(0), m_p__32(0), m_p__64(0), m_p_128(0), m_p_256(0), m_p_512(0), m_p1024(0), m_p2048(0), m_p4096(0), m_p8192(0)
 		{
 			std::map<unsigned int, unsigned int> m_bmap;
@@ -661,10 +661,10 @@ namespace cb_space_memorypool
 			//m_bmap[16]	= 100;	m_bmap[32]	= 100;	m_bmap[64]	 = 100; m_bmap[128]  = 100; m_bmap[256] = 100;
 			//m_bmap[512]	= 100;	m_bmap[1024]= 100;	m_bmap[2048] = 100; m_bmap[4096] = 100; m_bmap[8192]= 100;
 			unsigned int arr[] = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192};
-			mem_node* pnodehead = 0;
+			mcb_node* pnodehead = 0;
 			for(int i = sizeof(arr)/sizeof(arr[0]) - 1; i >= 0; --i)
 			{
-				mem_node* pnode = new_node(arr[i], m_bmap[arr[i]]);
+				mcb_node* pnode = new_node(arr[i], m_bmap[arr[i]]);
 				if(!pnode){
 					continue;
 				}
@@ -688,11 +688,11 @@ namespace cb_space_memorypool
 			}
 			m_pmemorydelhead = pnodehead;
 		}
-		virtual ~mem_pool(void)
+		virtual ~mcb_pool(void)
 		{
 			m_p__16 = 0; m_p__32 = 0; m_p__64 = 0; m_p_128 = 0; m_p_256 = 0;
 			m_p_512 = 0; m_p1024 = 0; m_p2048 = 0; m_p4096 = 0; m_p8192 = 0;
-			mem_node* phead = m_pmemorydelhead;
+			mcb_node* phead = m_pmemorydelhead;
 			while(phead)
 			{
 				char* p = (char*)phead->m_pblock;
@@ -708,7 +708,7 @@ namespace cb_space_memorypool
 			m_pmemorydelhead = 0;
 		}
 	public:
-		void* mem_pool_new(unsigned int n, int iflag = 1)
+		void* mcb_pool_new(unsigned int n, int iflag = 1)
 		{
 			//n = cb_alignup(n);
 			if(n <= 128)
@@ -767,27 +767,27 @@ namespace cb_space_memorypool
 				//(4096,8192]
 				return m_p8192->new_mem(iflag);
 			}
-			char* p = new(std::nothrow)char[n + sizeof(mem_node*)];
+			char* p = new(std::nothrow)char[n + sizeof(mcb_node*)];
 			if(p){
-				memset(p, 0, sizeof(mem_node*));
-				p += sizeof(mem_node*);
+				memset(p, 0, sizeof(mcb_node*));
+				p += sizeof(mcb_node*);
 			}
 			return p;
 		}
-		void  mem_pool_del(void* p)
+		void  mcb_pool_del(void* p)
 		{
 			if(!p) return ;
-			mem_node* pnode = 0;
-			char* pdel = (char*)p - sizeof(mem_node*);
-			memcpy(&pnode, pdel, sizeof(mem_node*));
+			mcb_node* pnode = 0;
+			char* pdel = (char*)p - sizeof(mcb_node*);
+			memcpy(&pnode, pdel, sizeof(mcb_node*));
 			pnode ? pnode->del_mem(p) : delete pdel, pdel = 0;
 		}
 	private:
-		mem_node* new_node(unsigned int ielemsize, unsigned int ielemcount)
+		mcb_node* new_node(unsigned int ielemsize, unsigned int ielemcount)
 		{
 			unsigned int size = ielemsize * ielemcount;
 			char* p = new(std::nothrow)char[size];
-			if(!p || (size < sizeof(mem_node) + sizeof(mem_node*) + ielemsize)){
+			if(!p || (size < sizeof(mcb_node) + sizeof(mcb_node*) + ielemsize)){
 				if(p){
 					delete p, p = 0;
 				}
@@ -795,15 +795,15 @@ namespace cb_space_memorypool
 			}
 			char* pend = p + size;
 			memset(p, 0, size);
-			mem_node* pnode = (mem_node*)p;
+			mcb_node* pnode = (mcb_node*)p;
 			pnode->m_ielemsize = ielemsize;
-			p += sizeof(mem_node);
-			pnode->m_pmemt = p + sizeof(mem_node*);
+			p += sizeof(mcb_node);
+			pnode->m_pmemt = p + sizeof(mcb_node*);
 			while(1){
-				memcpy(p, &pnode, sizeof(mem_node*));//node add
-				p += sizeof(mem_node*);
+				memcpy(p, &pnode, sizeof(mcb_node*));//node add
+				p += sizeof(mcb_node*);
 				//elemnext
-				char* pnext = p + ielemsize + sizeof(mem_node*);
+				char* pnext = p + ielemsize + sizeof(mcb_node*);
 				if(pnext + ielemsize > pend){
 					break;
 				}
@@ -814,12 +814,12 @@ namespace cb_space_memorypool
 			return pnode;
 		}
 	private:
-		mem_node* m_pmemorydelhead;
-		mem_node* m_p__16; mem_node* m_p__32;
-		mem_node* m_p__64; mem_node* m_p_128;
-		mem_node* m_p_256; mem_node* m_p_512;
-		mem_node* m_p1024; mem_node* m_p2048;
-		mem_node* m_p4096; mem_node* m_p8192;
+		mcb_node* m_pmemorydelhead;
+		mcb_node* m_p__16; mcb_node* m_p__32;
+		mcb_node* m_p__64; mcb_node* m_p_128;
+		mcb_node* m_p_256; mcb_node* m_p_512;
+		mcb_node* m_p1024; mcb_node* m_p2048;
+		mcb_node* m_p4096; mcb_node* m_p8192;
 	};
 	template<typename obj>class obj_pool
 	{
@@ -1114,7 +1114,7 @@ namespace cb_space_timer
 #else
 				cb_lockexchange(m_pcallbackparams->istop, 1);
 				while(cb_lockcompareexchange(m_pcallbackparams->istop, 2, 2) != 2){
-					em_sleep(200);
+					cb_sleep(200);
 				}
 #endif
 				delete m_pcallbackparams, m_pcallbackparams = 0;
