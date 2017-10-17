@@ -1869,7 +1869,7 @@ namespace cb_space_socket
 	};
 };
 
-namespace cb_space_algorithm
+namespace cb_space_endecryption
 {
 #pragma region	aes
 	const unsigned char aes_sbox[16][16] = 
@@ -3083,7 +3083,7 @@ namespace cb_space_algorithm
 	#define cb_md5_h(x, y, z) ((x) ^ (y) ^ (z))
 	#define cb_md5_i(x, y, z) ((y) ^ ((x) | (~z)))
 
-	#define cb_md5_rotateleft(num, n) (((num) << (n)) | ((num) >> (32-(n))))
+	#define cb_md5_rotateleft(num, n) (((num) << (n)) | ((num) >> (32 - (n))))
 
 	#define cb_md5_ff(a, b, c, d, x, s, ac){ \
 	  (a) += cb_md5_f((b), (c), (d)) + (x) + ac; \
@@ -3513,6 +3513,101 @@ namespace cb_space_algorithm
 			}
 			ideslen = j;
 			return p;
+		}
+	};
+};
+
+namespace cb_space_algorithm
+{
+	class cb_sort
+	{
+	public:
+		template<typename T>static void heap_sort(T a[], int n)//∂—≈≈–Ú÷˜∫Ø ˝
+		{
+			for(int i = n/2; i > 0; --i)
+				adjust_heap(a,i,n);
+			for(int i = n; i >= 2; --i)
+			{
+				swap(a[1], a[i]);
+				adjust_heap(a, 1, i-1);
+			}
+		}
+		template<typename T>static void merge_sort(T a[], int left, int right)//πÈ≤¢≈≈–Ú
+		{
+			if(left < right)
+			{
+				int mid = (left + right) / 2;
+				merge_sort(a, left, mid);
+				merge_sort(a, mid + 1, right);
+				merge(a, left, mid, right);
+			}
+		}
+		template<typename T>static void quick_sort(T a[], int first, int last)
+		{
+			if(first < last)
+			{
+				int tmp = partion(a, first, last + 1);
+				quick_sort(a, first, tmp - 1);
+				quick_sort(a, tmp + 1, last);
+			}
+		}
+	private:
+		template<typename T>static void adjust_heap(T a[], int i, int n)
+		{
+			int j = 2 * i;
+			T item = a[i];
+			while(j<=n)
+			{
+				if((j<n) && (a[j]<a[j+1]))
+					j++;
+				if(item >= a[j])
+					break;
+				a[j/2] = a[j];
+				j *= 2;
+			}
+			a[j/2] = item;
+		}
+		template<typename T>static void merge(T a[], int left, int partion, int right)
+		{
+			int n1 = partion - left + 1, n2 = right - partion;
+			T _L[n1 + 1], _R[n2 + 1];
+			_L[0] = _R[0] = INT_MAX; 
+
+			for(int i=1;i<n1;i++) _L[i]=a[left+i-1];
+			for(int j=1;j<n2;j++) _R[j]=a[q+j];
+
+			_L[n1+1] = _R[n2+1] = INT_MAX;
+			int ii = jj = 1;
+			for(int k = left; k < right; ++k)
+			{
+				do{
+					if(_L[ii] <= _R[jj])
+						a[k] = _L[ii++];
+					else
+						a[k] = _R[jj++];
+				}while((_L[ii] != INT_MAX) && (_R[jj] != INT_MAX));
+			}
+		}
+		template<typename T>static int partition(T a[], int first, int last)
+		{
+			T ref = a[last];
+			int i = first, j = last;
+			do
+			{
+				do{i++;}while(a[i] < ref);
+				do{j++;}while(a[j] > ref);
+				if(i < j)
+					swap(a[i], a[j]);
+			}while(i < j);
+			a[first] = a[j];
+			a[j] = ref;
+			return j;
+		}
+		template<typename T>inline static void swap(T& _x,T& _y)
+		{
+			T temp=x;
+			x=y;
+			y=temp;
 		}
 	};
 };
