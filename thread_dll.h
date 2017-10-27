@@ -2,15 +2,6 @@
 #ifndef __cb_cb__
 #define __cb_cb__
 
-#ifdef WIN32
-#include <iostream>		//std::nothrow
-#include <windows.h>	//for HANDLE
-#include <process.h>	//for _beginthreadex
-#pragma comment(lib, "Winmm.lib")
-#else
-#include <pthread.h>
-#endif
-
 //////////////////////////////////include///////////////////////////////////////
 
 #include <map>
@@ -39,21 +30,21 @@ typedef void* (*pvoid_proc_pvoid)(void*);
 //cb_log(0, "chenbo", "err", 0, 0, "%d %d", 0, 0);
 #ifdef WIN32
 #define cb_time(timebuf,timebuflen) {SYSTEMTIME t; GetLocalTime(&t); \
-	cb_sprintf(timebuf, timebuflen, "%d:%02d:%d %02d:%02d:%02d,%03d", t.wYear,t.wMonth,t.wDay,t.wHour,t.wMinute,t.wSecond,t.wMilliseconds);}
+	cb_sprintf(timebuf, timebuflen, "%04d-%02d-%02d %02d:%02d:%02d,%03d", t.wYear,t.wMonth,t.wDay,t.wHour,t.wMinute,t.wSecond,t.wMilliseconds);}
 #define cb_log(proc, modulename, level, pbuf, nbuflen, pfmt, ...)	\
 {\
 	char timebuf[64] = {0}; cb_time(timebuf, 64);\
 	if(!pbuf|| nbuflen <= 0)\
 	{\
 		char buf[4096] = {0};\
-		cb_sprintf(buf, sizeof(buf), "%s [%s] [%s:%d] [%s]"pfmt, timebuf, modulename, cb_filename(__FILE__), __LINE__, level, __VA_ARGS__);\
+		cb_sprintf(buf, sizeof(buf), "%s [%s] [%-16.16s:%5.d] [%s]"pfmt, timebuf, modulename, cb_filename(__FILE__), __LINE__, level, __VA_ARGS__);\
 		if(proc)\
 			((pvoid_proc_pvoid)proc)(buf);\
 		else\
 			printf(buf);\
 	}\
 	else{\
-		cb_sprintf(pbuf, nbuflen, "%s [%s] [%s:%d] [%s]"pfmt, timebuf, modulename, cb_filename(__FILE__), __LINE__, level, __VA_ARGS__);\
+		cb_sprintf(pbuf, nbuflen, "%s [%s] [%-16.16s:%5.d] [%s]"pfmt, timebuf, modulename, cb_filename(__FILE__), __LINE__, level, __VA_ARGS__);\
 		if(proc)\
 			((pvoid_proc_pvoid)proc)(pbuf);\
 		else\
@@ -62,7 +53,7 @@ typedef void* (*pvoid_proc_pvoid)(void*);
 }
 #else
 #define cb_time(timebuf, timebuflen) {char t[64] = {0}; struct timeval tv; gettimeofday(&tv, NULL); \
-	strftime(t, 64, "%Y:%m:%02d %H:%M:%S", localtime(&tv.tv_sec));\
+	strftime(t, 64, "%Y-%m-%d %H:%M:%S", localtime(&tv.tv_sec));\
 	cb_sprintf(timebuf, timebuflen, "%s,%03d",t,(int)(tv.tv_usec / 1000));}
 #define cb_log(proc, modulename, level, pbuf, nbuflen, pfmt, ...)	\
 {\
@@ -70,7 +61,7 @@ typedef void* (*pvoid_proc_pvoid)(void*);
 	if(!pbuf|| nbuflen <= 0)\
 	{\
 		char ptbuf[4096] = {0};\
-		std::string fmt(std::string("%s [%s] [%s:%d] [%s]") + std::string(pfmt));\
+		std::string fmt(std::string("%s [%s] [%-16.16s:%5.d] [%s]") + std::string(pfmt));\
 		cb_sprintf(ptbuf, 4095, fmt.c_str(), timebuf, modulename, cb_filename(__FILE__), __LINE__, level, ##__VA_ARGS__);\
 		if(proc)\
 			((pvoid_proc_pvoid)proc)(ptbuf);\
@@ -78,7 +69,7 @@ typedef void* (*pvoid_proc_pvoid)(void*);
 			printf(ptbuf);\
 	}\
 	else{\
-		std::string fmt(std::string("%s [%s] [%s:%d] [%s]") + std::string(pfmt));\
+		std::string fmt(std::string("%s [%s] [%-16.16s:%5.d] [%s]") + std::string(pfmt));\
 		cb_sprintf(pbuf, nbuflen, fmt.c_str(), timebuf, modulename, cb_filename(__FILE__), __LINE__, level, ##__VA_ARGS__);\
 		if(proc)\
 			((pvoid_proc_pvoid)proc)(pbuf);\
@@ -136,12 +127,15 @@ typedef void* (*pvoid_proc_pvoid)(void*);
 
 //////////////////////////////////thread////////////////////////////////////////
 #ifdef WIN32
+#include <windows.h>	//for HANDLE
+#include <process.h> //_beginthreadex
 #define cb_thread_fd HANDLE
 #define cb_create_thread(thread_fd, proc, params) ((thread_fd) = \
 	(cb_thread_fd)_beginthreadex(0, 0, (proc), (params), 0, 0))
 #define cb_thread_fail(thread_fd) (0 == (thread_fd))
 #define cb_close_thread_fd(thread_fd) CloseHandle(thread_fd)
 #else
+#include <pthread.h>
 #define cb_thread_fd pthread_t
 #define cb_create_thread(thread_fd, proc, params) pthread_attr_t cb__attr;\
 	pthread_attr_init(&cb__attr);\
@@ -256,7 +250,7 @@ lab_end:
 			{
 				p = new(std::nothrow) char[ilen];
 				if(!p)
-					return ;
+					goto lab_end;
 				memset(p, 0, ilen * sizeof(char));
 			}
 			mbstowcs(p, src.c_str(), ilen);
@@ -2740,29 +2734,29 @@ namespace cb_space_endecryption
 		}
 	};
 #pragma endregion
+	/*
+	char* p = "1111111111111111222222222222222233333333333333334444444444444444";
+	int iplen = strlen(p);
+	for(int i = 0; i < iplen; ++i){
+		cb_space_algorithm::cb_blowfish bf;
+		unsigned int len = 128;
+		char pdes[128] = {0};
+		bf.encrypt(p, i+1, pdes, len);
+
+		char buf[1024] = {0};
+		memcpy(buf, p, i + 1);
+		printf("%d, %s\n", i+1, buf);
+		//printf("%d, %s==%s\n", i+1, buf, pdes);
+
+		cb_space_algorithm::cb_blowfish bf2;
+		bf2.decrypt(pdes, len);
+		memset(buf, 0, 1024);
+		memcpy(buf, pdes, len);
+		printf("-->%d, %s\n", len, buf);
+	}
+	*/
 	class cb_blowfish
 	{
-		/*
-		char* p = "1111111111111111222222222222222233333333333333334444444444444444";
-		int iplen = strlen(p);
-		for(int i = 0; i < iplen; ++i){
-			cb_space_algorithm::cb_blowfish bf;
-			unsigned int len = 128;
-			char pdes[128] = {0};
-			bf.encrypt(p, i+1, pdes, len);
-
-			char buf[1024] = {0};
-			memcpy(buf, p, i + 1);
-			printf("%d, %s\n", i+1, buf);
-			//printf("%d, %s==%s\n", i+1, buf, pdes);
-
-			cb_space_algorithm::cb_blowfish bf2;
-			bf2.decrypt(pdes, len);
-			memset(buf, 0, 1024);
-			memcpy(buf, pdes, len);
-			printf("-->%d, %s\n", len, buf);
-		}
-		*/
 		struct blowfish_key
 		{
 			unsigned int p[18];
@@ -3115,16 +3109,16 @@ namespace cb_space_endecryption
 		'c', 'd', 'e', 'f'
 	};
 #pragma endregion
+	/*
+	printf("%s\n", cb_space_algorithm::cb_md5("").tostr().c_str());
+	printf("%s\n", cb_space_algorithm::cb_md5("a").tostr().c_str());
+	printf("%s\n", cb_space_algorithm::cb_md5("abc").tostr().c_str());
+	printf("%s\n", cb_space_algorithm::cb_md5("message digest").tostr().c_str());
+	printf("%s\n", cb_space_algorithm::cb_md5("abcdefghijklmnopqrstuvwxyz").tostr().c_str());
+	printf("%s\n", cb_space_algorithm::cb_md5("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz").tostr().c_str());
+	*/
 	class cb_md5
 	{
-		/*
-		printf("%s\n", cb_space_algorithm::cb_md5("").tostr().c_str());
-		printf("%s\n", cb_space_algorithm::cb_md5("a").tostr().c_str());
-		printf("%s\n", cb_space_algorithm::cb_md5("abc").tostr().c_str());
-		printf("%s\n", cb_space_algorithm::cb_md5("message digest").tostr().c_str());
-		printf("%s\n", cb_space_algorithm::cb_md5("abcdefghijklmnopqrstuvwxyz").tostr().c_str());
-		printf("%s\n", cb_space_algorithm::cb_md5("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz").tostr().c_str());
-		*/
 	public:
 		cb_md5(const std::string& strtext):m_finished(false)
 		{
@@ -3341,53 +3335,36 @@ namespace cb_space_endecryption
 		-2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2
 	};
 #pragma endregion
+	/*
+	const char test[] =
+	"Redistribution and use in source and binary forms, with or without\n";
+	
+	printf("message:%d\n", strlen(test));
+	printf("%s\n\n", test);
+
+	cb_space_algorithm::cb_base64 b64;
+
+	std::string penstr;
+	b64.base64_encode(test, strlen(test), penstr);
+	printf("encoded base64: %d\n%s\n\n", penstr.length(), penstr.c_str());
+
+	char buf[4096] = {0}; char* p1 = buf;
+	unsigned int idelen = 4096;
+	if(penstr.length() > 4096){
+		p1 = new char[idelen];
+		memset(p1, 0, idelen);
+		idelen = penstr.length();
+	}
+	char* pdestr = b64.base64_decode(penstr.c_str(), penstr.length(), p1, idelen);
+	if(pdestr){
+		printf("decoded again: %d\n%s\n\n", idelen, pdestr);
+		if(pdestr != p1){
+			delete pdestr, pdestr = 0;
+		}
+	}
+	*/
 	class cb_base64
 	{
-		/*
-		const char test[] =
-		"Redistribution and use in source and binary forms, with or without\n"
-		"modification, are permitted provided that the following conditions are met:\n"
-		"\n"
-		"1. Redistributions of source code must retain the above copyright notice, this\n"
-		"   list of conditions and the following disclaimer.\n"
-		"2. Redistributions in binary form must reproduce the above copyright notice,\n"
-		"   this list of conditions and the following disclaimer in the documentation\n"
-		"   and/or other materials provided with the distribution.\n"
-
-		"THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\" AND\n"
-		"ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED\n"
-		"WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE\n"
-		"DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR\n"
-		"ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES\n"
-		"(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;\n"
-		"LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND\n"
-		"ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT\n"
-		"(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS\n"
-		"SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.";
-		printf("message:%d\n", strlen(test));
-		printf("%s\n\n", test);
-
-		cb_space_algorithm::cb_base64 b64;
-
-		std::string penstr;
-		b64.base64_encode(test, strlen(test), penstr);
-		printf("encoded base64: %d\n%s\n\n", penstr.length(), penstr.c_str());
-
-		char buf[4096] = {0}; char* p1 = buf;
-		unsigned int idelen = 4096;
-		if(penstr.length() > 4096){
-			p1 = new char[idelen];
-			memset(p1, 0, idelen);
-			idelen = penstr.length();
-		}
-		char* pdestr = b64.base64_decode(penstr.c_str(), penstr.length(), p1, idelen);
-		if(pdestr){
-			printf("decoded again: %d\n%s\n\n", idelen, pdestr);
-			if(pdestr != p1){
-				delete pdestr, pdestr = 0;
-			}
-		}
-		*/
 	public:
 		cb_base64(){}
 		virtual ~cb_base64(){}
@@ -3522,94 +3499,292 @@ namespace cb_space_algorithm
 	class cb_sort
 	{
 	public:
-		template<typename T>static void heap_sort(T a[], int n)//¶ÑÅÅÐòÖ÷º¯Êý
+		template<typename T>static void quick_sort(T* pdata, int isize)
 		{
-			for(int i = n/2; i > 0; --i)
-				adjust_heap(a,i,n);
-			for(int i = n; i >= 2; --i)
+			/*
+			int a[] = {1, 5, 20, 3, 6, 2, 9, 4, 10, 7, 8, 14, 13, 16, 11, 19, 12, 15, 18, 17, 21};
+			cb_space_algorithm::cb_sort::quick_sort(a, sizeof(a)/sizeof(a[0]));
+			*/
+			quicksort(pdata, 0, isize - 1);
+		}
+		/* void* ==> int (*)(T&, T&); */
+		template<typename T>static void heap_sort(T* pdata, int isize, void* cmp = 0)
+		{
+			/*
+			int cmp_dec(int& i, int& j)
 			{
-				swap(a[1], a[i]);
-				adjust_heap(a, 1, i-1);
+				return i < j;
+			}
+			int a[] = {1, 5, 20, 3, 6, 2, 9, 4, 10, 7, 8, 14, 13, 16, 11, 19, 12, 15, 18, 17};
+			cb_space_algorithm::cb_sort::heap_sort(a, 20, cmp_dec);//default cmp is inc
+			*/
+			int i = isize / 2 - 1;
+			for(; i >= 0; --i)
+				adjust_heap(pdata, i, isize, cmp);
+			i = isize;
+			for(; i > 1; --i)
+			{
+				T t = pdata[0]; pdata[0] = pdata[i - 1]; pdata[i-1] = t;
+				adjust_heap(pdata, 0, i - 1, cmp);
 			}
 		}
-		template<typename T>static void merge_sort(T a[], int left, int right)//¹é²¢ÅÅÐò
+		template<typename T>static void merge_sort(T* pdata, int isize)
 		{
-			if(left < right)
-			{
-				int mid = (left + right) / 2;
-				merge_sort(a, left, mid);
-				merge_sort(a, mid + 1, right);
-				merge(a, left, mid, right);
-			}
-		}
-		template<typename T>static void quick_sort(T a[], int first, int last)
-		{
-			if(first < last)
-			{
-				int tmp = partion(a, first, last + 1);
-				quick_sort(a, first, tmp - 1);
-				quick_sort(a, tmp + 1, last);
-			}
+			/*
+			int a[] = {1, 5, 20, 3, 6, 2, 9, 4, 10, 7, 8, 14, 13, 16, 11, 19, 12, 15, 18, 17, 21};
+			cb_space_algorithm::cb_sort::merge_sort(a, sizeof(a)/sizeof(a[0]));
+			*/
+			mergesort(pdata, 0, isize - 1);
 		}
 	private:
-		template<typename T>static void adjust_heap(T a[], int i, int n)
+		template<typename T>static void quicksort(T* pdata, int ileft, int iright)
 		{
-			int j = 2 * i;
-			T item = a[i];
-			while(j<=n)
+			int ipivot = (ileft + iright)/2;
+			int npivot = pdata[ipivot];
+			for(int i = ileft, j = iright; i <= j; )
 			{
-				if((j<n) && (a[j]<a[j+1]))
-					j++;
-				if(item >= a[j])
-					break;
-				a[j/2] = a[j];
-				j *= 2;
+				while(pdata[i] <= npivot && i <= ipivot) i++;
+				if(i <= ipivot)
+				{
+					pdata[ipivot] = pdata[i];
+					ipivot = i;
+				}
+				while(pdata[j] >= npivot && j >= ipivot) j--;
+				if(j >= ipivot)
+				{
+					pdata[ipivot] = pdata[j];
+					ipivot = j;
+				}
 			}
-			a[j/2] = item;
+
+			pdata[ipivot] = npivot;
+
+			if(ipivot - ileft > 1)
+				quicksort(pdata, ileft, ipivot - 1);
+
+			if(iright - ipivot > 1)
+				quicksort(pdata, ipivot + 1, iright);
 		}
-		template<typename T>static void merge(T a[], int left, int partion, int right)
+		template<typename T>static void adjust_heap(T* pdata, int i, int num, void* cmp)
 		{
-			int n1 = partion - left + 1, n2 = right - partion;
-			T _L[n1 + 1], _R[n2 + 1];
-			_L[0] = _R[0] = INT_MAX; 
-
-			for(int i=1;i<n1;i++) _L[i]=a[left+i-1];
-			for(int j=1;j<n2;j++) _R[j]=a[q+j];
-
-			_L[n1+1] = _R[n2+1] = INT_MAX;
-			int ii = jj = 1;
-			for(int k = left; k < right; ++k)
-			{
-				do{
-					if(_L[ii] <= _R[jj])
-						a[k] = _L[ii++];
-					else
-						a[k] = _R[jj++];
-				}while((_L[ii] != INT_MAX) && (_R[jj] != INT_MAX));
+			int left = (2*(i)+1); int right = (2*(i)+2);
+			if(left < num){
+				if((right < num) && 
+					(cmp ? (((int (*)(T&, T&))cmp)(pdata[right], pdata[left]) > 0) 
+						: (pdata[right] > pdata[left])))
+				{
+					if(cmp ? (((int (*)(T&, T&))cmp)(pdata[right], pdata[i]) > 0) : (pdata[right] > pdata[i])){
+						T t = pdata[i]; pdata[i] = pdata[right]; pdata[right] = t;
+						adjust_heap(pdata, right, num, cmp);
+					}
+				}
+				else{
+					if(cmp ? (((int (*)(T&, T&))cmp)(pdata[left], pdata[i]) > 0) : (pdata[left] > pdata[i])){
+						T t = pdata[i]; pdata[i] = pdata[left]; pdata[left] = t;
+						adjust_heap(pdata, left, num, cmp);
+					}
+				}
 			}
 		}
-		template<typename T>static int partition(T a[], int first, int last)
+		template<typename T>static void mergesort(T* pdata, int begin, int end)
 		{
-			T ref = a[last];
-			int i = first, j = last;
-			do
+			if(begin < end)
 			{
-				do{i++;}while(a[i] < ref);
-				do{j++;}while(a[j] > ref);
-				if(i < j)
-					swap(a[i], a[j]);
-			}while(i < j);
-			a[first] = a[j];
-			a[j] = ref;
-			return j;
+				int middle = (begin + end)/2;
+				mergesort(pdata, begin, middle);
+				mergesort(pdata, middle + 1, end);
+				merge(pdata, begin, middle, end);
+			}
 		}
-		template<typename T>inline static void swap(T& _x,T& _y)
+		template<typename T>static void merge(T* pdata, int begin, int middle, int end)
 		{
-			T temp=x;
-			x=y;
-			y=temp;
+			int n = end - begin + 1, m = middle - begin + 1, isize = n, i = 0, j = m, k = begin;
+			T tarr[1024] = {0}; T* ptarr = tarr;
+			if(isize > 1024){
+				ptarr = new(std::nothrow) T[isize];
+				if(!ptarr)
+					return ;
+				memset(ptarr, 0, sizeof(T) * isize);
+			}
+			for(; i < isize; ++i)
+				ptarr[i] = pdata[begin + i];
+			for(i = 0; k <= end; ++k)
+			{
+				if(i == m){
+					pdata[k] = ptarr[j++];
+				}
+				else if(j == n){
+					pdata[k] = ptarr[i++];
+				}
+				else
+					ptarr[i] > ptarr[j] ? pdata[k] = ptarr[j++] : pdata[k] = ptarr[i++];
+			}
+			if(ptarr != tarr)
+				delete[] ptarr, ptarr = 0;
 		}
 	};
+};
+
+namespace cb_space_thread
+{
+	//auto / no signal
+#ifndef WIN32
+#include <sys/sem.h> //struct sembuf
+#endif
+	class cb_thread_0_0;
+	struct procparam
+	{
+		procparam():_proc(0),_procparam(0),_pthis(0)
+		{
+#ifdef WIN32
+			_hevent = 0;
+#else
+			_hevent = -1;
+			_istop = 0;
+#endif
+			createevent();
+
+		}
+		virtual~procparam(){_proc = 0; _procparam = 0; _pthis = 0; destoryevent();}
+		int createevent(void)
+		{
+#ifdef WIN32
+			if(_hevent){
+				int i = (::CloseHandle(_hevent) ? 0 : -1); _hevent = 0; return i;
+			}
+			return (_hevent = ::CreateEvent(0, 0/*1:need manualreset*/, 0/*0:no signal*/, 0)) ? 0 : -1;
+#else
+			_hevent = semget(IPC_PRIVATE, 1, IPC_CREAT|S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH);
+			if(_hevent == -1)
+				return -2;
+			return 0;
+#endif
+		}
+		int destoryevent(void)
+		{
+#ifdef WIN32
+			if(_hevent){
+				int i = (::CloseHandle(_hevent) ? 0 : -1); _hevent = 0; return i;
+			}
+			return 0;
+#else
+			_hevent = -1;
+#endif
+		}
+	public:
+		pvoid_proc_pvoid _proc;
+		void* _procparam;
+		cb_thread_0_0* _pthis;
+#ifdef WIN32
+		HANDLE _hevent;
+#else
+		int _hevent;
+		volatile int _istop;
+#endif
+	};
+#ifndef WIN32
+	void* __cb_thread_proc__(void* pprocparam)
+	{
+		procparam* pth = (procparam*)pprocparam;
+		while(cb_lockcompareexchange(pth->_istop, 0, 0) == 0)
+		{
+			struct sembuf sem;
+			sem.sem_num = 0;
+			sem.sem_op  = -1;
+			sem.sem_flg = 0;
+			if(semop(pth->_hevent, &sem, 1) == -1)
+				break;
+			pth->_proc(pth->_procparam);
+		}
+		cb_lockexchange(pth->_istop, 2);
+		return 0;
+	}
+#endif
+	/*
+	void* proc(void*){}
+
+	cb_space_thread::cb_thread th;
+	th.start(proc, 0);
+	int j = 0;
+	while(j++ < 10){
+		cb_sleep(1000);
+		th.setevent();
+	}
+	th.stop();
+	*/
+	class cb_thread_0_0
+	{
+	public:
+		virtual ~cb_thread_0_0(){stop();}
+	public:
+		int start(pvoid_proc_pvoid proc, void* pprocparam)
+		{
+			if(!proc)
+				return -1;
+
+			m_procparam._proc = proc;
+			m_procparam._procparam = pprocparam;
+			m_procparam._pthis = this;
+
+			cb_thread_fd tfd;
+			cb_create_thread(tfd, __cb_thread_proc__, &m_procparam);
+			if(cb_thread_fail(tfd))
+				return -2;
+
+			return 0;
+		}
+		int stop(void)
+		{
+#ifdef WIN32
+			return (m_procparam.destoryevent() | setevent());
+#else
+			cb_lockexchange(m_procparam._istop, 1);
+			while(cb_lockcompareexchange(m_procparam._istop, 2, 2) != 2){
+				cb_sleep(100);
+			}
+			return setevent();
+#endif
+		}
+		int setevent(void)
+		{
+#ifdef WIN32
+			return ::SetEvent(m_procparam._hevent) ? 0 : -1;
+#else
+			struct sembuf sem;
+			sem.sem_num = 0;
+			sem.sem_op  = 1;
+			sem.sem_flg = 0;
+			if(semop(m_procparam._hevent, &sem, 1) == -1){
+				return -2;
+			}
+			return 0;
+#endif
+		}
+	private:
+#ifdef WIN32
+		static unsigned int _stdcall __cb_thread_proc__(void* pprocparam)
+		{
+			procparam* pth = (procparam*)pprocparam;
+			while(1)
+			{
+				switch(WaitForSingleObject(pth->_hevent, -1))
+				{
+				case 0:
+					pth->_proc(pth->_procparam); break;
+				case 258: break;//time over
+				//case -1: iret = 1;
+				//case 128: iret = 2;
+				default:
+					return (unsigned int)-1;
+				}
+			}
+			return 0;
+		}
+#endif
+	private:
+		procparam m_procparam;
+	};
+
 };
 
 #endif
