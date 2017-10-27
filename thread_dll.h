@@ -178,6 +178,16 @@ typedef void* (*pvoid_proc_pvoid)(void*);
 
 namespace cb_space_publicfunc
 {
+	struct cb_timeinfo{
+		cb_timeinfo():year(0), month(0), day(0), hour(0), minute(0), second(0), millisecond(0){}
+		int year;
+		int month;
+		int day;
+		int hour;
+		int minute;
+		int second;
+		int millisecond;
+	};
 	class cb_staticfunc
 	{
 	public:
@@ -378,24 +388,22 @@ lab_end:
 			}
 			return 0;
 		}
-
+		
 	#ifdef WIN32
+		/*
+		#ifdef WIN32
+		#define cb_codeconvert_value_read CP_UTF8, CP_ACP
+		#define cb_codeconvert_value_write CP_ACP, CP_UTF8
+		#else
+		#define cb_codeconvert_value_read "utf-8", "gbk"
+		#define cb_codeconvert_value_write "gbk", "utf-8"
+		#endif
+		codeconvert(str, sText.c_str(), cb_codeconvert_value_write);*/
 		static int transcoding(std::string& out, const char* _in, unsigned int fromcodepage, unsigned int tocodepage)
 	#else
 		static int transcoding(std::string& out, const char* _in, const char* fromcodepage, const char* tocodepage)
 	#endif
 		{
-			/*
-			#ifdef WIN32
-			#define cb_codeconvert_value_read CP_UTF8, CP_ACP
-			#define cb_codeconvert_value_write CP_ACP, CP_UTF8
-			#else
-			#define cb_codeconvert_value_read "utf-8", "gbk"
-			#define cb_codeconvert_value_write "gbk", "utf-8"
-			#endif
-
-			codeconvert(str, sText.c_str(), cb_codeconvert_value_write);
-			*/
 			if(!_in || !*_in){
 				return -1;
 			}
@@ -454,19 +462,19 @@ lab_end:
 	#endif
 			return 0;
 		}
-
-		static int gettimeinfo(int& year, int& month, int& day, int& hour, int& minute, int& second, int& millisecond)
+		
+		/*
+		cb_timeinfo tinfo;
+		cb_space_publicfunc::cb_staticfunc::gettimeinfo(tinfo);
+		printf("%d-%02d-%02d %02d:%02d:%02d %03d\n", 
+			tinfo.year, tinfo.month, tinfo.day, tinfo.hour, tinfo.minute, tinfo.second, tinfo.millisecond);*/
+		static int gettimeinfo(cb_timeinfo& tinfo)
 		{
-			/*
-			int y, m, d, h, mi, s, ms;
-			cb_space_publicfunc::cb_staticfunc::gettimeinfo(y, m, d, h, mi, s, ms);
-			printf("%d-%02d-%02d %02d:%02d:%02d %03d\n", y, m, d, h, mi, s, ms);
-			*/
 #ifdef WIN32
 			SYSTEMTIME t;
 			GetLocalTime(&t);
-			year = t.wYear; month = t.wMonth; day = t.wDay;
-			hour = t.wHour; minute = t.wMinute; second = t.wSecond; millisecond = t.wMilliseconds;
+			tinfo.year = t.wYear; tinfo.month = t.wMonth; tinfo.day = t.wDay;
+			tinfo.hour = t.wHour; tinfo.minute = t.wMinute; tinfo.second = t.wSecond; tinfo.millisecond = t.wMilliseconds;
 #else
 			struct timeval tv;
 			memset(&tv, 0, sizeof(timeval));
@@ -474,8 +482,8 @@ lab_end:
 			struct tm* time_ptr = localtime(&tv.tv_sec);
 			if(!time_ptr)
 				return -1;
-			year = time_ptr->tm_year + 1900; month = time_ptr->tm_mon + 1; day = time_ptr->tm_mday;
-			hour = time_ptr->tm_hour; minute = time_ptr->tm_min; second = time_ptr->tm_sec; millisecond = tv.tv_usec / 1000;
+			tinfo.year = time_ptr->tm_year + 1900; tinfo.month = time_ptr->tm_mon + 1; tinfo.day = time_ptr->tm_mday;
+			tinfo.hour = time_ptr->tm_hour; tinfo.minute = time_ptr->tm_min; tinfo.second = time_ptr->tm_sec; tinfo.millisecond = tv.tv_usec / 1000;
 #endif
 			return 0;
 		}
