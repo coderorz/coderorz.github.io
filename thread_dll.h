@@ -664,7 +664,8 @@ namespace cb_space_memorypool
 			//m_bmap[512]	= 100;	m_bmap[1024]= 100;	m_bmap[2048] = 100; m_bmap[4096] = 100; m_bmap[8192]= 100;
 			unsigned int arr[] = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192};
 			mcb_node* pnodehead = 0;
-			for(int i = sizeof(arr)/sizeof(arr[0]) - 1; i >= 0; --i)
+			int i = sizeof(arr)/sizeof(arr[0]) - 1;
+			for(; i >= 0; --i)
 			{
 				mcb_node* pnode = new_node(arr[i], m_bmap[arr[i]]);
 				if(!pnode){
@@ -2574,7 +2575,8 @@ namespace cb_space_endecryption
 				w[idx] = ((key[4 * idx]) << 24) | ((key[4 * idx + 1]) << 16) |
 					((key[4 * idx + 2]) << 8) | ((key[4 * idx + 3]));
 			}
-			for(idx = Nk; idx < Nb * (Nr+1); ++idx)
+			int isize = Nb * (Nr+1);
+			for(idx = Nk; idx < isize; ++idx)
 			{
 				temp = w[idx - 1];
 				if((idx % Nk) == 0)
