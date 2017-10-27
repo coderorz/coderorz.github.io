@@ -492,7 +492,7 @@ lab_end:
 
 namespace cb_space_memorypool
 {
-	class mcb_pool
+	class mem_pool
 	{
 		struct mcb_node
 		{
@@ -654,7 +654,7 @@ namespace cb_space_memorypool
 			}
 		};
 	public:
-		mcb_pool(void)
+		mem_pool(void)
 			:m_pmemorydelhead(0), m_p__16(0), m_p__32(0), m_p__64(0), m_p_128(0), m_p_256(0), m_p_512(0), m_p1024(0), m_p2048(0), m_p4096(0), m_p8192(0)
 		{
 			std::map<unsigned int, unsigned int> m_bmap;
@@ -691,7 +691,7 @@ namespace cb_space_memorypool
 			}
 			m_pmemorydelhead = pnodehead;
 		}
-		virtual ~mcb_pool(void)
+		virtual ~mem_pool(void)
 		{
 			m_p__16 = 0; m_p__32 = 0; m_p__64 = 0; m_p_128 = 0; m_p_256 = 0;
 			m_p_512 = 0; m_p1024 = 0; m_p2048 = 0; m_p4096 = 0; m_p8192 = 0;
@@ -833,15 +833,6 @@ namespace cb_space_memorypool
 			elem*				m_pelemhead;
 			node<elem>*	m_pnodenext;
 		};
-	public:
-		int m_pagesize;
-		volatile long m_newnodelock;
-		node<obj>* m_pnodehead;
-		node<obj>* m_pnodetail;
-		node<obj>* m_pnodeaddi;
-		volatile long m_naddilock;
-		obj* m_pobj;
-		volatile long m_nobjlock;
 	public:
 		obj_pool(int inodecount = 10, int ipagesize = 1024 * 8)
 			:m_pagesize(ipagesize), m_newnodelock(0), m_pnodehead(0), m_pnodetail(0), m_pnodeaddi(0), m_naddilock(0), m_pobj(0), m_nobjlock(0)
@@ -1035,6 +1026,15 @@ namespace cb_space_memorypool
 			}
 			return pnode;
 		}
+	private:
+		int m_pagesize;
+		volatile long m_newnodelock;
+		node<obj>* m_pnodehead;
+		node<obj>* m_pnodetail;
+		node<obj>* m_pnodeaddi;
+		volatile long m_naddilock;
+		obj* m_pobj;
+		volatile long m_nobjlock;
 	};
 };
 
@@ -1143,18 +1143,18 @@ namespace cb_space_poling{
 /*
 void* proc(void* p)
 {
-test* pt = (test*)p;
-if(!pt){
-	return (void*)-1;
-}
-do{
-	printf("-----%d\n", pt->i);
-	test* pdel = pt;
-	pt = pt->pnext;
-	delete pdel, pdel = 0;
-}while(pt);
+	test* pt = (test*)p;
+	if(!pt){
+		return (void*)-1;
+	}
+	do{
+		printf("-----%d\n", pt->i);
+		test* pdel = pt;
+		pt = pt->pnext;
+		delete pdel, pdel = 0;
+	}while(pt);
 
-return 0;
+	return 0;
 }
 
 cb_space_poling::ctimerpoling<test> t;
