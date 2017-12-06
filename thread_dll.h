@@ -6,6 +6,14 @@
 
 #include <map>
 
+#ifdef WIN32
+	#include <winsock2.h>
+	#include <MSWSock.h>
+	#pragma comment(lib, "WS2_32")
+#else
+	
+#endif
+
 //////////////////////////////////include///////////////////////////////////////
 
 //////////////////////////////////public////////////////////////////////////////
@@ -127,6 +135,7 @@ typedef void* (*pvoid_proc_pvoid)(void*);
 
 //////////////////////////////////thread////////////////////////////////////////
 #ifdef WIN32
+#pragma comment(lib, "Winmm")//WinXP -> __imp__timeSetEvent
 #include <windows.h>	//for HANDLE
 #include <process.h> //_beginthreadex
 #define cb_thread_fd HANDLE
@@ -151,7 +160,7 @@ typedef void* (*pvoid_proc_pvoid)(void*);
 #pragma comment(lib, "ws2_32.lib")
 #define cb_socket SOCKET
 #define cb_sockoptlen int
-#define cb_localip(buf, bufsize, __sockaddr_in) {\
+#define cb_localip(buf, bufsize, __sockaddr_in){\
 	char* __pip = inet_ntoa(__sockaddr_in.sin_addr); \
 	if(__pip && bufsize > strlen(__pip)) memcpy(buf, __pip, bufsize);}
 #define cb_closesock(sock) {if(sock != -1){closesocket(sock);sock = -1;}}
@@ -165,7 +174,7 @@ typedef void* (*pvoid_proc_pvoid)(void*);
 #else
 #define cb_socket int
 #define cb_sockoptlen socklen_t
-#define cb_localip(buf, bufsize, __sockaddr_in) {\
+#define cb_localip(buf, bufsize, __sockaddr_in){\
 	inet_ntop(AF_INET, &__sockaddr_in.sin_addr, buf, bufsize);}
 #define cb_closesock(sock) {if(sock != -1){close(sock);sock = -1;}}
 #define cb_bool_sock_block (cb_errno == EINPROGRESS)
@@ -392,13 +401,13 @@ lab_end:
 	#ifdef WIN32
 		/*
 		#ifdef WIN32
-		#define cb_codeconvert_value_read CP_UTF8, CP_ACP
-		#define cb_codeconvert_value_write CP_ACP, CP_UTF8
+		#define cb_transcoding_read  CP_UTF8, CP_ACP
+		#define cb_transcoding_write CP_ACP, CP_UTF8
 		#else
-		#define cb_codeconvert_value_read "utf-8", "gbk"
-		#define cb_codeconvert_value_write "gbk", "utf-8"
+		#define cb_transcoding_read  "utf-8", "gbk"
+		#define cb_transcoding_write "gbk", "utf-8"
 		#endif
-		codeconvert(str, sText.c_str(), cb_codeconvert_value_write);*/
+		transcoding(str, sText.c_str(), cb_codeconvert_value_write);*/
 		static int transcoding(std::string& out, const char* _in, unsigned int fromcodepage, unsigned int tocodepage)
 	#else
 		static int transcoding(std::string& out, const char* _in, const char* fromcodepage, const char* tocodepage)
@@ -1280,14 +1289,15 @@ private:
 	cb_space_timer::cb_timer m_timer;
 };
 
-template<typename t> class ctimerpolingex;
+template<typename t> class cb_timerpolingex;
 template<typename t> struct pollnodeex;
 template<typename t> struct telem
 {
-	telem():pprev(0),pnext(0),ppollnodeex(0){}
+	telem():pprev(0),pnext(0),pref(0),ppollnodeex(0){}
 	t data;
 	telem* pprev;
 	telem* pnext;
+	void* pref;
 	pollnodeex<t>* ppollnodeex;
 };
 template<typename t> struct pollnodeex
@@ -1302,35 +1312,38 @@ template<typename t> struct cb_paramsex
 {
 	cb_paramsex():proc(0),pthis(0){}
 	pvoid_proc_pvoid proc;
-	ctimerpolingex<t>* pthis;
+	cb_timerpolingex<t>* pthis;
 };
 #ifndef WIN32
 template<typename t> void* __cb_poling_proc__(void* pparams);
 #endif
 /*
-void* proc2(void* p)
+static int N = 0;
+void* proc(void*)
 {
-	test* pt = (test*)p;
-	if(!pt){
-		printf("err\n");
-		return (void*)-1;
-	}
-	printf("----%d\n", pt->i);
+	cb_log(0, "chenbo", "err", 0, 0, "%04d\n", ++N);
 	return 0;
 }
 
-cb_space_poling::ctimerpolingex<test> t;
-t.start(1000, 5, proc2);
-int i = 0;
+struct xxx{
+	void* p;
+	int i;
+};
+
+
+cb_space_poling::cb_timerpolingex<xxx> t;
+t.start(1000, 5, proc);
 void* p = 0;
+int i = 0;
 while(i++ < 200){
-	test pt;
+	xxx pt;
 	pt.i = i;
 	Sleep(10);
-	p = t.add(pt);
+	pt.p = 0;
+	t.add(pt, &pt.p);
 	if(i%7 == 0){
 		printf("del %d\n", i);
-		t.del(p);
+		t.del(pt.p);
 	}
 }
 getchar();
@@ -1350,7 +1363,7 @@ public:
 public:
 	int start(int idelaytime, int ipolingcount, pvoid_proc_pvoid proc, int iproccount = 2);
 	int stop(void);
-	void* add(const t& _data);
+	void* add(const t& _data, void* pref);
 	int del(void* p);
 private:
 	int handletimeout(pvoid_proc_pvoid proc);
@@ -1452,7 +1465,6 @@ int cb_timerpolingex<t>::stop(void)
 		}
 		cb_sleep(100);
 	}
-	printf("stop...\n");
 	//timer
 	m_timer.stop();
 	//delete memory
@@ -1462,7 +1474,7 @@ int cb_timerpolingex<t>::stop(void)
 	return 0;
 }
 template<typename t>
-void* cb_timerpolingex<t>::add(const t& _data)
+void* cb_timerpolingex<t>::add(const t& _data, void* pref = 0)
 {
 	telem<t>* ptdata = m_tpool.newobj();
 	if(!ptdata)
@@ -1470,6 +1482,10 @@ void* cb_timerpolingex<t>::add(const t& _data)
 	pollnodeex<t>* padd = m_phead->m_pprev;
 	while(cb_lockcompareexchange(padd->m_nlock, 1, 0) == 1) padd = m_phead->m_pprev;
 	memcpy(&ptdata->data, &_data, sizeof(_data));
+	if(pref){
+		memcpy(pref, &ptdata, sizeof(void*));
+		ptdata->pref = pref;
+	}
 	ptdata->ppollnodeex = padd;
 	if(padd->m_pthead){
 		padd->m_pthead->pprev = ptdata;
@@ -1523,6 +1539,9 @@ int cb_timerpolingex<t>::handletimeout(pvoid_proc_pvoid proc)
 	telem<t>* ptelem = get();
 	if(!ptelem){
 		return 1;
+	}
+	if(ptelem->pref){
+		memset(ptelem->pref, 0, sizeof(void*));
 	}
 	proc(&ptelem->data);
 	m_tpool.delobj(ptelem);
@@ -1609,7 +1628,7 @@ void cb_timerpolingex<t>::releasehandletelem(void)
 template<typename t>
 void* cb_timerpolingex<t>::invokeex(void* pparams)
 {
-	ctimerpolingex<t>* pthis = (ctimerpolingex<t>*)pparams;
+	cb_timerpolingex<t>* pthis = (cb_timerpolingex<t>*)pparams;
 	if(!pthis){
 		return (void*)-1;
 	}
@@ -1638,6 +1657,8 @@ pollnodeex<t>* cb_timerpolingex<t>::createloop(int ipolingcount)
 	m_phead = m_pdel;
 	return m_phead;
 }
+
+
 };
 
 namespace cb_space_socket
@@ -3794,7 +3815,157 @@ namespace cb_space_thread
 	private:
 		procparam m_procparam;
 	};
+};
 
+namespace cb_space_server
+{
+#define cb_io_pending WSA_IO_PENDING
+	typedef OVERLAPPED cb_overlapped;
+	typedef enum io_type
+	{
+		io_type_null,
+	//	io_type_conn,
+		io_type_dofr,
+		io_type_recv,
+	}io_type;
+	typedef struct sock_context
+	{
+
+		cb_socket sock;
+	}sock_context,*psock_context;
+	typedef struct listen_io_context
+	{
+		cb_overlapped ol;
+
+	}listen_io_context,*plisten_io_context;
+	typedef struct io_context
+	{
+		cb_overlapped ol;
+		io_type iotype;
+		WSABUF iobuf;
+	}io_context,*pio_context;
+#define cb_io_containing_record(p, cb_sname) CONTAINING_RECORD(p, cb_sname, ol);
+	class iocp_coderorz
+	{
+		iocp_coderorz():m_hiocp(0),m_slistensock(~0),m_lpfnacceptex(0),m_lpfngetacceptexsockaddrs(0),m_lpfndisconnectex(0){}
+		iocp_coderorz(const iocp_coderorz& ref);
+		iocp_coderorz& operator=(const iocp_coderorz& ref);
+	public:
+		void start(void)
+		{
+			m_apoling.start(3000, 10, accept_timeout, 1);
+		}
+		void stop(void)
+		{
+			m_apoling.stop();
+		}
+		virtual ~iocp_coderorz(){}
+	public:
+		void delsockc(psock_context psockc)
+		{
+			
+		}
+		void delioc(pio_context pioc)
+		{
+
+		}
+		void doaccept(plisten_io_context plisten_ioc)
+		{
+
+		}
+		void handleiocp(psock_context psockc, pio_context pioc, unsigned long dwbytes)
+		{
+			switch(pioc->iotype)
+			{
+			case io_type_dofr:
+
+				break;
+			case io_type_recv:
+
+				break;
+			case io_type_null:
+				break;
+			}
+		}
+		cb_thread_fd ioport(void){return m_hiocp;}
+	public:
+		static iocp_coderorz& instance(void){static iocp_coderorz ref;return ref;}
+		static unsigned long __stdcall iocp_proc(void* p)
+		{
+			iocp_coderorz* piocp = (iocp_coderorz*)p; cb_thread_fd hiocp = piocp->ioport();
+			psock_context psockc(0); cb_overlapped* piocp_ol(0); unsigned long dwbytes(0);
+			while(1)
+			{
+				if(GetQueuedCompletionStatus(hiocp, &dwbytes, (unsigned long __w64*)&psockc, &piocp_ol, -1))
+				{
+					if(dwbytes > 0){
+						pio_context pioc = cb_io_containing_record(piocp_ol, io_context);
+						piocp->handleiocp(psockc, pioc, dwbytes);
+					}
+					else if(dwbytes == 0){
+						if(!psockc){
+							plisten_io_context pioc = cb_io_containing_record(piocp_ol, listen_io_context);
+							piocp->doaccept(pioc);
+						}
+						else{
+							if(psockc){
+								piocp->delsockc(psockc);
+							}
+							pio_context pioc = cb_io_containing_record(piocp_ol, io_context);
+							if(pioc){
+								piocp->delioc(pioc);
+							}
+						}
+					}
+					continue;
+				}
+				if(psockc){
+					piocp->delsockc(psockc);
+				}
+				if(piocp_ol)
+				{
+					pio_context pioc = cb_io_containing_record(piocp_ol, io_context);
+					if(pioc){
+						piocp->delioc(pioc);
+					}
+				}
+			}
+			//exit
+			return 0;
+		}
+		static void* accept_timeout(void* p)
+		{
+			iocp_coderorz::instance();
+			return 0;
+		}
+	private:
+		int postrecv(psock_context psockc, pio_context pioc)
+		{
+			unsigned long dwbytes(0), dwflags(0);
+			if(-1 == WSARecv(psockc->sock, &pioc->iobuf, 1, &dwbytes, &dwflags, &pioc->ol, 0) 
+				&& (cb_io_pending != cb_errno))
+			{
+				//cb_errno;
+				//int i = delsockc(psockc);
+				//if((i & 2) == 2){
+				//	m_syslog.writelog("delete socket 3 ...\n");
+				//}
+				//m_syslog.writelog("delete io 1...\n");
+				//m_iocpool.delobj(pNewIOC);
+				return -1;
+			}
+			return 0;
+		}
+	private:
+		cb_thread_fd				m_hiocp;
+		cb_socket					m_slistensock;
+		LPFN_ACCEPTEX				m_lpfnacceptex;
+		LPFN_GETACCEPTEXSOCKADDRS	m_lpfngetacceptexsockaddrs;
+		LPFN_DISCONNECTEX			m_lpfndisconnectex;
+		cb_space_poling::cb_timerpolingex<psock_context> m_apoling;
+	};
+
+	class epoll_coderorz{};
 };
 
 #endif
