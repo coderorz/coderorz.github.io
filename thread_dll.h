@@ -120,6 +120,7 @@ typedef void* (*pvoid_proc_pvoid)(void*);
 //////////////////////////////////file//////////////////////////////////////////
 
 //////////////////////////////////lock//////////////////////////////////////////
+typedef volatile unsigned long cb_lock_ul;
 #ifdef WIN32
 #define cb_lockexchange(k, v) InterlockedExchange(&k, v)
 #define cb_lockcompareexchange(k, v, c) InterlockedCompareExchange(&k, v, c)
@@ -1182,7 +1183,7 @@ template<typename t> class cb_timerpoling
 {
 	struct pollnode
 	{
-		volatile unsigned long m_nlock;
+		cb_lock_ul m_nlock;
 		t* m_pthead;
 		pollnode* m_pprev;
 		pollnode* m_pnext;
@@ -1303,7 +1304,7 @@ template<typename t> struct telem
 template<typename t> struct pollnodeex
 {
 	pollnodeex():m_nlock(0),m_pthead(0),m_pprev(0),m_pnext(0){}
-	volatile unsigned long m_nlock;
+	cb_lock_ul m_nlock;
 	telem<t>* m_pthead;
 	pollnodeex* m_pprev;
 	pollnodeex* m_pnext;
@@ -1318,6 +1319,7 @@ template<typename t> struct cb_paramsex
 template<typename t> void* __cb_poling_proc__(void* pparams);
 #endif
 /*
+//thread unsafe
 static int N = 0;
 void* proc(void*)
 {
@@ -1658,7 +1660,194 @@ pollnodeex<t>* cb_timerpolingex<t>::createloop(int ipolingcount)
 	return m_phead;
 }
 
-
+/*
+struct cb : public cb_space_poling::serverbase{
+	int x;
+};
+cb_space_memorypool::obj_pool<cb> cb_pool;
+void* proc2(void* p)
+{
+	if(p){
+		cb* pcb = (cb*)p;
+		//cb_log(0, "chenbo", "info", 0, 0, "timeout %04d\n", pcb->x);
+		cb_pool.delobj(p);
+	}
+	return 0;
+}
+cb_space_poling::cb_timerpolingserver s;
+s.start(1000, 1, proc2);
+for(int i = 0; i < 100000; ++i){
+	cb* pz = cb_pool.newobj();
+	if(pz){
+		pz->x = i;
+		s.add(pz);
+		if(i%9 == 0){
+			s.del(pz);
+			//cb_log(0, "chenbo", "info", 0, 0, "del %04d\n", pz->x);
+			cb_pool.delobj(pz);
+		}
+	}
+}
+getchar();
+s.stop();
+*/
+struct pollnodeserver;
+struct serverbase
+{
+	serverbase():m_nlock(0),m_pprev(0),m_pnext(0){}
+	cb_lock_ul m_nlock;
+	serverbase* m_pprev;
+	serverbase* m_pnext;
+	pollnodeserver* m_pnode;
+};
+struct pollnodeserver
+{
+	pollnodeserver():m_pbase(0),m_nlock(0),m_pprev(0),m_pnext(0){}
+	serverbase* m_pbase;
+	cb_lock_ul m_nlock;
+	pollnodeserver* m_pprev;
+	pollnodeserver* m_pnext;
+};
+class cb_timerpolingserver
+{
+public:
+	cb_timerpolingserver():m_proc(0),m_pnodehead(0),m_pdel(0){}
+	virtual ~cb_timerpolingserver(){stop();}
+public:
+	static void* invoke(void* pparams)
+	{
+		cb_timerpolingserver* pthis = (cb_timerpolingserver*)pparams;
+		pthis->invoke();
+		return 0;
+	}
+public:
+	int start(int idelaytime, int ipolingcount, pvoid_proc_pvoid _proc)
+	{
+		if(idelaytime <= 0 || ipolingcount <= 0 || !_proc){
+			return -1;
+		}
+		if(!createloop(ipolingcount)){
+			return -2;
+		}
+		m_proc = _proc;
+		return m_timer.start(idelaytime, invoke, this);
+	}
+	int add(serverbase* padd)
+	{
+		if(!padd){
+			return -1;
+		}
+		pollnodeserver* pnode = m_pnodehead->m_pprev;
+		while(cb_lockcompareexchange(pnode->m_nlock, 1, 0) == 1) pnode = m_pnodehead->m_pprev;
+		{
+			while(cb_lockcompareexchange(padd->m_nlock, 1, 0) == 1);
+			if(pnode->m_pbase){
+				pnode->m_pbase->m_pprev = padd;
+				padd->m_pnext = pnode->m_pbase;
+			}
+			padd->m_pnode = pnode;
+			pnode->m_pbase = padd;
+			cb_lockexchange(padd->m_nlock, 0);
+		}
+		cb_lockexchange(pnode->m_nlock, 0);
+		return 0;
+	}
+	int del(serverbase* pdel)
+	{
+		if(!pdel){
+			return -1;
+		}
+		pollnodeserver* pnode = pdel->m_pnode;
+		if(pnode)
+		{
+			while(cb_lockcompareexchange(pnode->m_nlock, 1, 0) == 1);
+			{
+				while(cb_lockcompareexchange(pdel->m_nlock, 1, 0) == 1);
+				if(pdel->m_pnode){
+					if(pnode->m_pbase == pdel){
+						pnode->m_pbase = pdel->m_pnext;
+						if(pdel->m_pnext){
+							pdel->m_pnext->m_pprev = 0;
+						}
+					}
+					else{
+						pdel->m_pprev->m_pnext = pdel->m_pnext;
+						if(pdel->m_pnext){
+							pdel->m_pnext->m_pprev = pdel->m_pprev;
+						}
+					}
+					pdel->m_pnode = 0;
+				}
+				pdel->m_pnext = pdel->m_pprev = 0;
+				cb_lockexchange(pdel->m_nlock, 0);
+			}
+			cb_lockexchange(pnode->m_nlock, 0);
+		}
+		return 0;
+	}
+	int stop(void)
+	{
+		m_timer.stop();
+		m_proc = 0; m_pnodehead = 0;
+		if(m_pdel){
+			delete []m_pdel, m_pdel = 0;
+		}
+		return 0;
+	}
+private:
+	int invoke(void)
+	{
+		while(cb_lockcompareexchange(m_pnodehead->m_nlock, 1, 0) == 1);
+		if(m_pnodehead->m_pbase)
+		{
+			serverbase* phead = m_pnodehead->m_pbase;
+			while(phead)
+			{
+				serverbase* pdel = phead;
+				phead = phead->m_pnext;
+				if(phead)
+					phead->m_pprev = 0;
+				while(cb_lockcompareexchange(pdel->m_nlock, 1, 0) == 1);
+				pdel->m_pprev = 0;
+				pdel->m_pnode = 0;
+				pdel->m_pnext = 0;
+				cb_lockexchange(pdel->m_nlock, 0);
+				m_proc(pdel);
+			}
+			m_pnodehead->m_pbase = 0;
+		}
+		pollnodeserver* pnode = m_pnodehead;
+		m_pnodehead = m_pnodehead->m_pnext;
+		cb_lockexchange(pnode->m_nlock, 0);
+		return 0;
+	}
+	pollnodeserver* createloop(int ipolingcount)
+	{
+		if(ipolingcount <= 0)
+			return 0;
+		ipolingcount += 1;//
+		m_pdel = new(std::nothrow) pollnodeserver[ipolingcount];
+		if(!m_pdel)
+			return 0;
+		memset(m_pdel, 0, sizeof(pollnodeserver) * ipolingcount);
+		pollnodeserver* ptail = 0;
+		for(int i = 0; i < ipolingcount - 1; ++i)
+		{
+			m_pnodehead = &m_pdel[i]; ptail = &m_pdel[i + 1];
+			m_pnodehead->m_pnext = ptail;
+			ptail->m_pprev = m_pnodehead;
+		}
+		ptail->m_pnext = m_pdel;
+		m_pdel->m_pprev = ptail;
+		m_pnodehead = m_pdel;
+		return m_pnodehead;
+	}
+private:
+	pvoid_proc_pvoid m_proc;
+	pollnodeserver* m_pnodehead;
+	pollnodeserver* m_pdel;
+	cb_space_timer::cb_timer m_timer;
+};
 };
 
 namespace cb_space_socket
