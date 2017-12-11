@@ -998,6 +998,9 @@ namespace cb_space_memorypool
 				{
 					if(!m_pobj){
 						m_pobj = (obj*)p;
+						if((int)m_pobj == 0x00000001){
+							int i = 0;
+						}
 						cb_lockexchange(m_nobjlock, 0);
 						return ;
 					}
@@ -1007,6 +1010,9 @@ namespace cb_space_memorypool
 			while(cb_lockcompareexchange(pnode->m_nlock, 1, 0) == 1);
 			memcpy(p, &pnode->m_pelemhead, sizeof(obj*));
 			pnode->m_pelemhead = (obj*)p;
+			if((int)(pnode->m_pelemhead) == 0x00000001){
+				int i = 0;
+			}
 			cb_lockexchange(pnode->m_nlock, 0);
 		}
 	private:
@@ -1708,6 +1714,7 @@ struct pollnodeserver
 	pollnodeserver* m_pprev;
 	pollnodeserver* m_pnext;
 };
+volatile static unsigned long count = 0;
 class cb_timerpolingserver
 {
 public:
@@ -1730,23 +1737,24 @@ public:
 			return -2;
 		}
 		m_proc = _proc;
-		return m_timer.start(idelaytime, invoke, this);
+		return m_timer.start(idelaytime/ipolingcount, invoke, this);
 	}
 	int add(serverbase* padd)
 	{
-		if(!padd){
-			return -1;
-		}
+		if(!padd) return -1;
+		cb_lockexadd(count, 1);
 		pollnodeserver* pnode = m_pnodehead->m_pprev;
 		while(cb_lockcompareexchange(pnode->m_nlock, 1, 0) == 1) pnode = m_pnodehead->m_pprev;
 		{
 			while(cb_lockcompareexchange(padd->m_nlock, 1, 0) == 1);
-			if(pnode->m_pbase){
-				pnode->m_pbase->m_pprev = padd;
-				padd->m_pnext = pnode->m_pbase;
+			{
+				if(pnode->m_pbase){
+					pnode->m_pbase->m_pprev = padd;
+					padd->m_pnext = pnode->m_pbase;
+				}
+				padd->m_pnode = pnode;
+				pnode->m_pbase = padd;
 			}
-			padd->m_pnode = pnode;
-			pnode->m_pbase = padd;
 			cb_lockexchange(padd->m_nlock, 0);
 		}
 		cb_lockexchange(pnode->m_nlock, 0);
@@ -1754,31 +1762,28 @@ public:
 	}
 	int del(serverbase* pdel)
 	{
-		if(!pdel){
-			return -1;
-		}
-		pollnodeserver* pnode = pdel->m_pnode;
-		if(pnode)
+		if(!pdel) return -1;
+		if(pdel->m_pnode)
 		{
+			pollnodeserver *pnode = pdel->m_pnode;
 			while(cb_lockcompareexchange(pnode->m_nlock, 1, 0) == 1);
 			{
 				while(cb_lockcompareexchange(pdel->m_nlock, 1, 0) == 1);
-				if(pdel->m_pnode){
-					if(pnode->m_pbase == pdel){
+				{
+					if(!pdel->m_pprev)
+					{
 						pnode->m_pbase = pdel->m_pnext;
-						if(pdel->m_pnext){
+						if(pdel->m_pnext)
 							pdel->m_pnext->m_pprev = 0;
-						}
 					}
 					else{
 						pdel->m_pprev->m_pnext = pdel->m_pnext;
-						if(pdel->m_pnext){
+						if(pdel->m_pnext)
 							pdel->m_pnext->m_pprev = pdel->m_pprev;
-						}
 					}
 					pdel->m_pnode = 0;
+					pdel->m_pnext = pdel->m_pprev = 0;
 				}
-				pdel->m_pnext = pdel->m_pprev = 0;
 				cb_lockexchange(pdel->m_nlock, 0);
 			}
 			cb_lockexchange(pnode->m_nlock, 0);
@@ -1798,27 +1803,27 @@ private:
 	int invoke(void)
 	{
 		while(cb_lockcompareexchange(m_pnodehead->m_nlock, 1, 0) == 1);
-		if(m_pnodehead->m_pbase)
 		{
 			serverbase* phead = m_pnodehead->m_pbase;
 			while(phead)
 			{
 				serverbase* pdel = phead;
+				while(cb_lockcompareexchange(pdel->m_nlock, 1, 0) == 1);
 				phead = phead->m_pnext;
 				if(phead)
 					phead->m_pprev = 0;
-				while(cb_lockcompareexchange(pdel->m_nlock, 1, 0) == 1);
 				pdel->m_pprev = 0;
 				pdel->m_pnode = 0;
 				pdel->m_pnext = 0;
 				cb_lockexchange(pdel->m_nlock, 0);
+				cb_lockexadd(count, -1);
 				m_proc(pdel);
 			}
 			m_pnodehead->m_pbase = 0;
+			pollnodeserver* pnode = m_pnodehead;
+			m_pnodehead = m_pnodehead->m_pnext;
+			cb_lockexchange(pnode->m_nlock, 0);
 		}
-		pollnodeserver* pnode = m_pnodehead;
-		m_pnodehead = m_pnodehead->m_pnext;
-		cb_lockexchange(pnode->m_nlock, 0);
 		return 0;
 	}
 	pollnodeserver* createloop(int ipolingcount)
