@@ -834,6 +834,90 @@ namespace cb_space_memorypool
 		mcb_node* m_p1024; mcb_node* m_p2048;
 		mcb_node* m_p4096; mcb_node* m_p8192;
 	};
+	/*
+	struct memtest
+	{
+		memtest():next(0), prev(0){}
+		memtest* next;
+		memtest* prev;
+		int i;
+		char x;
+		double d;
+	};
+	
+	memtest* head = 0;
+	volatile unsigned long lock = 0;
+	int add(memtest* pdata)
+	{
+		if(!pdata)
+			return -1;
+		while(cb_lockcompareexchange(lock, 1, 0) == 1);
+		if(!head){
+			head = pdata;
+		}
+		else{
+			pdata->next = head;
+			head->prev = pdata;
+			head = pdata;
+		}
+		cb_lockexchange(lock, 0);
+		return 0;
+	}
+	
+	memtest* get(void)
+	{
+		memtest* p = 0;
+		while(cb_lockcompareexchange(lock, 1, 0) == 1);
+		if(head){
+			p = head;
+			head = head->next;
+			if(head)
+				head->prev = 0;
+			p->next = 0;
+		}
+		cb_lockexchange(lock, 0);
+		return p;
+	}
+	
+	static unsigned int __stdcall memtestproc(void* p)
+	{
+		cb_space_memorypool::obj_pool<memtest>* pmemt = (cb_space_memorypool::obj_pool<memtest>*)p;
+		while(1){
+			memtest* pt = pmemt->newobj();
+			if(pt){
+				add(pt);
+				//cb_sleep(1);
+			}
+		}
+		return 0;
+	}
+	
+	static unsigned int __stdcall memtestproc2(void* p)
+	{
+		cb_space_memorypool::obj_pool<memtest>* pmemt = (cb_space_memorypool::obj_pool<memtest>*)p;
+		while(1){
+			memtest* pt = get();
+			if(pt){
+				pmemt->delobj(pt);
+				//cb_sleep(1);
+			}
+		}
+		return 0;
+	}
+
+	cb_space_memorypool::obj_pool<memtest> memt;
+	for(int i = 0; i < 200; ++i){
+		cb_thread_fd tfd;
+		cb_create_thread(tfd, memtestproc, &memt);
+		cb_thread_fail(tfd);
+	}
+
+	for(int i = 0; i < 100; ++i){
+		cb_thread_fd tfd;
+		cb_create_thread(tfd, memtestproc2, &memt);
+		cb_thread_fail(tfd);
+	}
+	*/
 	template<typename obj>class obj_pool
 	{
 		template<typename elem> struct node
@@ -3666,28 +3750,32 @@ namespace cb_space_endecryption
 
 namespace cb_space_algorithm
 {
+	/*
+	int a[] = {1, 5, 20, 3, 6, 2, 9, 4, 10, 7, 8, 14, 13, 16, 11, 19, 12, 15, 18, 17, 21};
+	cb_space_algorithm::cb_sort::quick_sort(a, sizeof(a)/sizeof(a[0]));
+	*/
+	/*
+	int cmp_dec(int& i, int& j)
+	{
+		return i < j;
+	}
+	int a[] = {1, 5, 20, 3, 6, 2, 9, 4, 10, 7, 8, 14, 13, 16, 11, 19, 12, 15, 18, 17};
+	cb_space_algorithm::cb_sort::heap_sort(a, 20, cmp_dec);//default cmp is inc
+	*/
+	/*
+	int a[] = {1, 5, 20, 3, 6, 2, 9, 4, 10, 7, 8, 14, 13, 16, 11, 19, 12, 15, 18, 17, 21};
+	cb_space_algorithm::cb_sort::merge_sort(a, sizeof(a)/sizeof(a[0]));
+	*/
 	class cb_sort
 	{
 	public:
 		template<typename T>static void quick_sort(T* pdata, int isize)
 		{
-			/*
-			int a[] = {1, 5, 20, 3, 6, 2, 9, 4, 10, 7, 8, 14, 13, 16, 11, 19, 12, 15, 18, 17, 21};
-			cb_space_algorithm::cb_sort::quick_sort(a, sizeof(a)/sizeof(a[0]));
-			*/
 			quicksort(pdata, 0, isize - 1);
 		}
 		/* void* ==> int (*)(T&, T&); */
 		template<typename T>static void heap_sort(T* pdata, int isize, void* cmp = 0)
 		{
-			/*
-			int cmp_dec(int& i, int& j)
-			{
-				return i < j;
-			}
-			int a[] = {1, 5, 20, 3, 6, 2, 9, 4, 10, 7, 8, 14, 13, 16, 11, 19, 12, 15, 18, 17};
-			cb_space_algorithm::cb_sort::heap_sort(a, 20, cmp_dec);//default cmp is inc
-			*/
 			int i = isize / 2 - 1;
 			for(; i >= 0; --i)
 				adjust_heap(pdata, i, isize, cmp);
@@ -3700,10 +3788,6 @@ namespace cb_space_algorithm
 		}
 		template<typename T>static void merge_sort(T* pdata, int isize)
 		{
-			/*
-			int a[] = {1, 5, 20, 3, 6, 2, 9, 4, 10, 7, 8, 14, 13, 16, 11, 19, 12, 15, 18, 17, 21};
-			cb_space_algorithm::cb_sort::merge_sort(a, sizeof(a)/sizeof(a[0]));
-			*/
 			mergesort(pdata, 0, isize - 1);
 		}
 	private:
