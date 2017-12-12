@@ -6,7 +6,7 @@
 
 #include <map>
 
-#ifdef WIN32
+#ifdef WIN32 //iocp
 	#include <winsock2.h>
 	#include <MSWSock.h>
 	#pragma comment(lib, "WS2_32")
@@ -136,9 +136,9 @@ typedef volatile unsigned long cb_lock_ul;
 
 //////////////////////////////////thread////////////////////////////////////////
 #ifdef WIN32
-#pragma comment(lib, "Winmm")//WinXP -> __imp__timeSetEvent
-#include <windows.h>	//for HANDLE
-#include <process.h> //_beginthreadex
+#pragma comment(lib, "Winmm")	//WinXP -> __imp__timeSetEvent
+#include <windows.h>			//for HANDLE
+#include <process.h>			//_beginthreadex
 #define cb_thread_fd HANDLE
 #define cb_create_thread(thread_fd, proc, params) ((thread_fd) = \
 	(cb_thread_fd)_beginthreadex(0, 0, (proc), (params), 0, 0))
@@ -509,9 +509,9 @@ namespace cb_space_memorypool
 		public:
 			mcb_node():m_nlock(0), m_pmemhead(0), m_ntlock(0), m_pmemt(0), m_ielemsize(0), m_pblock(0), m_pnextnode(0){}
 		public:
-			volatile long m_nlock;			//连续内存单元锁
+			cb_lock_ul m_nlock;			//连续内存单元锁
 			void* m_pmemhead;				//连续内存单元的第一个地址,每个单元头sizeof(void*)个字节内容指向下一个内存单元的地址
-			volatile long m_ntlock;			//临时内存单元锁
+			cb_lock_ul m_ntlock;			//临时内存单元锁
 			void* m_pmemt;					//临时存储一个变量,可提高效率
 			unsigned int m_ielemsize;		//每个内存块的size
 			void* m_pblock;					//内存块地址,后sizeof(void*)个字节内容指向下一个内存块的地址,但是内存块都插入到m_pmemhead
@@ -839,7 +839,7 @@ namespace cb_space_memorypool
 		template<typename elem> struct node
 		{
 			node():m_nlock(0), m_pelemhead(0), m_pnodenext(0){}
-			volatile long		m_nlock;
+			cb_lock_ul		m_nlock;
 			elem*				m_pelemhead;
 			node<elem>*	m_pnodenext;
 		};
@@ -998,9 +998,6 @@ namespace cb_space_memorypool
 				{
 					if(!m_pobj){
 						m_pobj = (obj*)p;
-						if((int)m_pobj == 0x00000001){
-							int i = 0;
-						}
 						cb_lockexchange(m_nobjlock, 0);
 						return ;
 					}
@@ -1010,9 +1007,6 @@ namespace cb_space_memorypool
 			while(cb_lockcompareexchange(pnode->m_nlock, 1, 0) == 1);
 			memcpy(p, &pnode->m_pelemhead, sizeof(obj*));
 			pnode->m_pelemhead = (obj*)p;
-			if((int)(pnode->m_pelemhead) == 0x00000001){
-				int i = 0;
-			}
 			cb_lockexchange(pnode->m_nlock, 0);
 		}
 	private:
@@ -1044,13 +1038,13 @@ namespace cb_space_memorypool
 		}
 	private:
 		int m_pagesize;
-		volatile long m_newnodelock;
+		cb_lock_ul m_newnodelock;
 		node<obj>* m_pnodehead;
 		node<obj>* m_pnodetail;
 		node<obj>* m_pnodeaddi;
-		volatile long m_naddilock;
+		cb_lock_ul m_naddilock;
 		obj* m_pobj;
-		volatile long m_nobjlock;
+		cb_lock_ul m_nobjlock;
 	};
 };
 
@@ -1155,7 +1149,8 @@ namespace cb_space_timer
 	};
 };
 
-namespace cb_space_poling{
+namespace cb_space_polling
+{
 /*
 void* proc(void* p)
 {
@@ -1296,114 +1291,297 @@ private:
 	cb_space_timer::cb_timer m_timer;
 };
 
-template<typename t> class cb_timerpolingex;
-template<typename t> struct pollnodeex;
-template<typename t> struct telem
+class cb_timerpolling2;
+struct pollnodeex;
+struct telem
 {
-	telem():pprev(0),pnext(0),pref(0),ppollnodeex(0){}
-	t data;
+	telem():pprev(0),pnext(0),ppollnodeex(0){}
 	telem* pprev;
 	telem* pnext;
-	void* pref;
-	pollnodeex<t>* ppollnodeex;
+	pollnodeex* ppollnodeex;
 };
-template<typename t> struct pollnodeex
+struct pollnodeex
 {
 	pollnodeex():m_nlock(0),m_pthead(0),m_pprev(0),m_pnext(0){}
-	cb_lock_ul m_nlock;
-	telem<t>* m_pthead;
+	cb_lock_ul	m_nlock;
+	telem*		m_pthead;
 	pollnodeex* m_pprev;
 	pollnodeex* m_pnext;
 };
-template<typename t> struct cb_paramsex
+struct cb_paramsex
 {
 	cb_paramsex():proc(0),pthis(0){}
 	pvoid_proc_pvoid proc;
-	cb_timerpolingex<t>* pthis;
+	cb_timerpolling2* pthis;
 };
 #ifndef WIN32
-template<typename t> void* __cb_poling_proc__(void* pparams);
+void* __cb_poling_proc__(void* pparams);
 #endif
 /*
-//thread unsafe
-static int N = 0;
-void* proc(void*)
+struct cb2 : public cb_space_polling::telem{
+	long x;
+};
+
+void* proc2(void* p)
 {
-	cb_log(0, "chenbo", "err", 0, 0, "%04d\n", ++N);
+	if(!p) return 0;
+	cb2* pt = (cb2*)p;
+	cb_log(0, "chenbo", "err", 0, 0, "%04d\n", pt->x);
 	return 0;
 }
 
-struct xxx{
-	void* p;
-	int i;
-};
-
-
-cb_space_poling::cb_timerpolingex<xxx> t;
-t.start(1000, 5, proc);
+cb_space_memorypool::obj_pool<cb2> memt;
+cb_space_polling::cb_timerpolingex t;
+t.start(1000, 10, proc2, 10);
 void* p = 0;
 int i = 0;
-while(i++ < 200){
-	xxx pt;
-	pt.i = i;
+while(1){
+	if(i++ > 1000000){
+		i = 0;
+	}
+	cb2* pt = memt.newobj();
+	pt->x = i;
 	Sleep(10);
-	pt.p = 0;
-	t.add(pt, &pt.p);
+	t.add(pt);
 	if(i%7 == 0){
 		printf("del %d\n", i);
-		t.del(pt.p);
+		t.del(pt);
 	}
 }
 getchar();
 t.stop();
 */
-template<typename t> class cb_timerpolingex
+class cb_timerpolling2
 {
 #ifndef WIN32
-	friend void* __cb_poling_proc__<t>(void* pparams);
+	friend void* __cb_poling_proc__(void* pparams);
 #endif
 public:
-	cb_timerpolingex()
+	cb_timerpolling2()
 		:m_handlehead(0),m_handlelock(0),m_nhandleprocexitflag(0),m_nhandleproccount(0),m_phead(0),m_pdel(0){}
-	virtual ~cb_timerpolingex(){
-		stop();
-	}
+	virtual ~cb_timerpolling2(){stop();}
 public:
-	int start(int idelaytime, int ipolingcount, pvoid_proc_pvoid proc, int iproccount = 2);
-	int stop(void);
-	void* add(const t& _data, void* pref);
-	int del(void* p);
+	int start(int idelaytime, int ipolingcount, pvoid_proc_pvoid proc, int iproccount = 1)
+	{
+		if(idelaytime <= 0 || ipolingcount <= 0 || !proc){
+			return -1;
+		}
+		if(!createloop(ipolingcount)){
+			return -2;
+		}
+		m_timer.start(idelaytime/ipolingcount, invokeex, this);
+		m_paramsex.proc = proc;
+		m_paramsex.pthis = this;
+		while(iproccount-- > 0)
+		{
+			cb_thread_fd tfd;
+#ifdef WIN32
+			cb_create_thread(tfd, __cb_poling_proc__, &m_paramsex);
+#else
+			cb_create_thread(tfd, __cb_poling_proc__, &m_paramsex);
+#endif
+			if(cb_thread_fail(tfd)){
+				return -3;
+			}
+			cb_lockexadd(m_nhandleproccount, 1);
+		}
+		return 0;
+	}
+	int stop(void)
+	{
+		//release pool obj
+		releasehandletelem();
+		//stop handle timeout proc (proc count)
+		cb_lockexchange(m_nhandleprocexitflag, 1);
+		while(1)
+		{
+			if(cb_lockcompareexchange(m_nhandleproccount, 0, 0) == 0)
+			{
+				break;
+			}
+			cb_sleep(100);
+		}
+		//timer
+		m_timer.stop();
+		//delete memory
+		if(m_pdel){
+			delete []m_pdel, m_pdel = 0;
+		}
+		return 0;
+	}
+	int add(telem* pt)
+	{
+		if(!pt) return -1;
+		pollnodeex* padd = m_phead->m_pprev;
+		while(cb_lockcompareexchange(padd->m_nlock, 1, 0) == 1) padd = m_phead->m_pprev;
+		{
+			pt->ppollnodeex = padd;
+			if(padd->m_pthead)
+			{
+				padd->m_pthead->pprev = pt;
+				pt->pnext = padd->m_pthead;
+			}
+			padd->m_pthead = pt;
+		}
+		cb_lockexchange(padd->m_nlock, 0);
+		return 0;
+	}
+	int del(void* p)
+	{
+		if(!p) return -1;
+		telem* pt = (telem*)p;
+		if(pt->ppollnodeex)
+		{
+			pollnodeex* pnode = pt->ppollnodeex;
+			while(cb_lockcompareexchange(pnode->m_nlock, 1, 0) == 1);
+			{
+				if(!pt->pprev){
+					pnode->m_pthead = pt->pnext;
+					if(pt->pnext){
+						pt->pnext->pprev = 0;
+					}
+				}
+				else{
+					pt->pprev->pnext = pt->pnext;
+					if(pt->pnext){
+						pt->pnext->pprev = pt->pprev;
+					}
+				}
+				pt->ppollnodeex = 0;
+				pt->pnext = pt->pprev = 0;
+			}
+			cb_lockexchange(pnode->m_nlock, 0);
+		}
+		return 0;
+	}
 private:
-	int handletimeout(pvoid_proc_pvoid proc);
-	int invokeex(void);
-	telem<t>* get(void);
-	void add(telem<t>* phead, telem<t>* ptail);
-	void releasehandletelem(void);
-	static void* invokeex(void* pparams);
+	telem* get(void)
+	{
+		telem* pret = 0;
+		while(cb_lockcompareexchange(m_handlelock, 1, 0) == 1);
+		if(m_handlehead)
+		{
+			pret = m_handlehead;
+			m_handlehead = m_handlehead->pnext;
+			if(pret->pnext)
+				pret->pnext->pprev = 0;
+			pret->pnext = 0;
+		}
+		cb_lockexchange(m_handlelock, 0);
+		return pret;
+	}
+	int invokeex(void)
+	{
+		while(cb_lockcompareexchange(m_phead->m_nlock, 1, 0) == 1);
+		pollnodeex* pdelnode = m_phead;
+		m_phead = m_phead->m_pnext;
+		if(pdelnode->m_pthead)
+		{
+			telem* ptelemhead = pdelnode->m_pthead;
+			telem* ptelemtail = 0;
+			while(ptelemhead)
+			{
+				ptelemtail = ptelemhead;
+				ptelemhead->ppollnodeex = 0;//*
+				ptelemhead = ptelemhead->pnext;
+			}
+			add(pdelnode->m_pthead, ptelemtail);
+			pdelnode->m_pthead = 0;
+		}
+		cb_lockexchange(pdelnode->m_nlock, 0);
+		return 0;
+	}
+	void add(telem* phead, telem* ptail)
+	{
+		if(!phead) return ;
+		while(cb_lockcompareexchange(m_handlelock, 1, 0) == 1);
+		if(ptail){
+			if(m_handlehead){
+				ptail->pnext = m_handlehead;
+				m_handlehead->pprev = ptail;
+			}
+		}
+		else{
+			if(m_handlehead){
+				phead->pnext = m_handlehead;
+				m_handlehead->pprev = phead;
+			}
+		}
+		m_handlehead = phead;
+		cb_lockexchange(m_handlelock, 0);
+	}
+	void releasehandletelem(void)
+	{
+		if(m_handlehead)
+		{
+			while(cb_lockcompareexchange(m_handlelock, 1, 0) == 1);
+			telem* pdel = m_handlehead;
+			while(pdel)
+			{
+				m_handlehead = m_handlehead->pnext;
+				if(m_handlehead){
+					m_handlehead->pprev = 0;
+				}
+				pdel->pnext = 0;
+				pdel->ppollnodeex = 0;
+				m_paramsex.proc(pdel);
+				pdel = m_handlehead;
+			}
+			m_handlehead = 0;
+			cb_lockexchange(m_handlelock, 0);
+		}
+	}
+	static void* invokeex(void* pparams)
+	{
+		cb_timerpolling2* pthis = (cb_timerpolling2*)pparams;
+		if(!pthis){
+			return (void*)-1;
+		}
+		pthis->invokeex();
+		return 0;
+	}
 #ifdef WIN32
 	static unsigned int __stdcall __cb_poling_proc__(void* pparams);
 #endif
-	pollnodeex<t>* createloop(int ipolingcount);
+	pollnodeex* createloop(int ipolingcount)
+	{
+		if(ipolingcount <= 0)
+			return 0;
+		ipolingcount += 1;//
+		m_pdel = new(std::nothrow) pollnodeex[ipolingcount];
+		if(!m_pdel)
+			return 0;
+		memset(m_pdel, 0, sizeof(pollnodeex) * ipolingcount);
+		pollnodeex* ptail = 0;
+		for(int i = 0; i < ipolingcount - 1; ++i)
+		{
+			m_phead = &m_pdel[i]; ptail = &m_pdel[i + 1];
+			m_phead->m_pnext = ptail;
+			ptail->m_pprev = m_phead;
+		}
+		ptail->m_pnext = m_pdel;
+		m_pdel->m_pprev = ptail;
+		m_phead = m_pdel;
+		return m_phead;
+	}
 public:
-	volatile long m_nhandleprocexitflag;
-	volatile long m_nhandleproccount;
+	cb_lock_ul m_nhandleprocexitflag;
+	cb_lock_ul m_nhandleproccount;
 private:
-	telem<t>* m_handlehead;
-	volatile long m_handlelock;
-	pollnodeex<t>* m_phead;
-	pollnodeex<t>* m_pdel;
-	cb_paramsex<t> m_paramsex;
-	cb_space_memorypool::obj_pool<telem<t> > m_tpool;
+	telem* m_handlehead;
+	cb_lock_ul m_handlelock;
+	pollnodeex* m_phead;
+	pollnodeex* m_pdel;
+	cb_paramsex m_paramsex;
 	cb_space_timer::cb_timer m_timer;
 };
-template<typename t>
 #ifndef WIN32
 void* __cb_poling_proc__(void* pparams)
 #else
-unsigned int __stdcall cb_timerpolingex<t>::__cb_poling_proc__(void* pparams)
+unsigned int __stdcall cb_timerpolling2::__cb_poling_proc__(void* pparams)
 #endif
 {
-	cb_paramsex<t>* p = (cb_paramsex<t>*)pparams;
+	cb_paramsex* p = (cb_paramsex*)pparams;
 	if(!p)
 #ifdef WIN32
 		return -1;
@@ -1411,259 +1589,29 @@ unsigned int __stdcall cb_timerpolingex<t>::__cb_poling_proc__(void* pparams)
 		return (void*)-1;
 #endif
 	int iret = 0;
+	cb_timerpolling2* pthis = p->pthis;
 	while(1)
 	{
-		if(cb_lockcompareexchange(p->pthis->m_nhandleprocexitflag, 1, 1) == 1)
+		if(cb_lockcompareexchange(pthis->m_nhandleprocexitflag, 1, 1) == 1)
 		{
-			cb_lockexsub(p->pthis->m_nhandleproccount, 1);
+			cb_lockexsub(pthis->m_nhandleproccount, 1);
 			break;
 		}
-		iret = p->pthis->handletimeout(p->proc);
-		if(iret == -1){//err
-			cb_lockexsub(p->pthis->m_nhandleproccount, 1);
-			break;
+		telem* ptelem = pthis->get();
+		if(!ptelem){
+			cb_sleep(10);
 		}
-		if(iret != 0)
-		{
-			cb_sleep(100);
-		}
-	}
-	return 0;
-}
-template<typename t>
-int cb_timerpolingex<t>::start(int idelaytime, int ipolingcount, pvoid_proc_pvoid proc, int iproccount)
-{
-	if(idelaytime <= 0 || ipolingcount <= 0 || !proc){
-		return -1;
-	}
-	if(!createloop(ipolingcount)){
-		return -2;
-	}
-	m_timer.start(idelaytime/ipolingcount, invokeex, this);
-	m_paramsex.proc = proc;
-	m_paramsex.pthis = this;
-	int i = 0;
-	while(i++ < iproccount)
-	{
-		cb_thread_fd tfd;
-#ifdef WIN32
-		cb_create_thread(tfd, __cb_poling_proc__, &m_paramsex);
-#else
-		cb_create_thread(tfd, __cb_poling_proc__<t>, &m_paramsex);
-#endif
-		if(cb_thread_fail(tfd)){
-			return -3;
-		}
-		cb_lockexadd(m_nhandleproccount, 1);
-	}
-	return 0;
-}
-template<typename t>
-int cb_timerpolingex<t>::stop(void)
-{
-	//release pool obj
-	releasehandletelem();
-	//stop handle timeout proc (proc count)
-	cb_lockexchange(m_nhandleprocexitflag, 1);
-	while(1)
-	{
-		if(cb_lockcompareexchange(m_nhandleproccount, 0, 0) == 0)
-		{
-			break;
-		}
-		cb_sleep(100);
-	}
-	//timer
-	m_timer.stop();
-	//delete memory
-	if(m_pdel){
-		delete []m_pdel, m_pdel = 0;
-	}
-	return 0;
-}
-template<typename t>
-void* cb_timerpolingex<t>::add(const t& _data, void* pref = 0)
-{
-	telem<t>* ptdata = m_tpool.newobj();
-	if(!ptdata)
-		return (void*)-1;
-	pollnodeex<t>* padd = m_phead->m_pprev;
-	while(cb_lockcompareexchange(padd->m_nlock, 1, 0) == 1) padd = m_phead->m_pprev;
-	memcpy(&ptdata->data, &_data, sizeof(_data));
-	if(pref){
-		memcpy(pref, &ptdata, sizeof(void*));
-		ptdata->pref = pref;
-	}
-	ptdata->ppollnodeex = padd;
-	if(padd->m_pthead){
-		padd->m_pthead->pprev = ptdata;
-		ptdata->pnext = padd->m_pthead;
-	}
-	padd->m_pthead = ptdata;
-	cb_lockexchange(padd->m_nlock, 0);
-	return ptdata;
-}
-template<typename t>
-int cb_timerpolingex<t>::del(void* p)
-{
-	telem<t>* ptdata = (telem<t>*)p;
-	if(!ptdata)
-		return -1;
-	pollnodeex<t>* pnode = ptdata->ppollnodeex;
-	if(pnode)
-	{
-		while(cb_lockcompareexchange(pnode->m_nlock, 1, 0) == 1);
-		if(ptdata->ppollnodeex)
-		{
-			if(pnode->m_pthead == ptdata){
-				pnode->m_pthead = ptdata->pnext;
-				if(ptdata->pnext){
-					ptdata->pnext->pprev = 0;
-				}
+		else{
+			if(p->proc){
+				p->proc(ptelem);
 			}
 			else{
-				ptdata->pprev->pnext = ptdata->pnext;
-				if(ptdata->pnext){
-					ptdata->pnext->pprev = ptdata->pprev;
-				}
+				cb_lockexsub(pthis->m_nhandleproccount, 1);
+				break;
 			}
-			ptdata->ppollnodeex = 0;
 		}
-		ptdata->pnext = ptdata->pprev = 0;
-		cb_lockexchange(pnode->m_nlock, 0);
 	}
-	else{
-		ptdata->pnext = ptdata->pprev = 0;
-	}
-	m_tpool.delobj(ptdata);
 	return 0;
-}
-template<typename t>
-int cb_timerpolingex<t>::handletimeout(pvoid_proc_pvoid proc)
-{
-	if(!proc){
-		return -1;
-	}
-	telem<t>* ptelem = get();
-	if(!ptelem){
-		return 1;
-	}
-	if(ptelem->pref){
-		memset(ptelem->pref, 0, sizeof(void*));
-	}
-	proc(&ptelem->data);
-	m_tpool.delobj(ptelem);
-	return 0;
-}
-template<typename t>
-int cb_timerpolingex<t>::invokeex(void)
-{
-	while(cb_lockcompareexchange(m_phead->m_nlock, 1, 0) == 1);
-	pollnodeex<t>* pdelnode = m_phead;
-	m_phead = m_phead->m_pnext;
-	if(pdelnode->m_pthead){
-		telem<t>* ptelemhead = pdelnode->m_pthead;
-		telem<t>* ptelemtail = 0;
-		while(ptelemhead){
-			ptelemtail = ptelemhead;
-			ptelemhead->ppollnodeex = 0;//*
-			ptelemhead = ptelemhead->pnext;
-		}
-		add(pdelnode->m_pthead, ptelemtail);
-		pdelnode->m_pthead = 0;
-	}
-	cb_lockexchange(pdelnode->m_nlock, 0);
-	return 0;
-}
-template<typename t>
-telem<t>* cb_timerpolingex<t>::get(void)
-{
-	telem<t>* pret = 0;
-	while(cb_lockcompareexchange(m_handlelock, 1, 0) == 1);
-	if(m_handlehead)
-	{
-		pret = m_handlehead;
-		m_handlehead = m_handlehead->pnext;
-		if(m_handlehead)
-			m_handlehead->pprev = 0;
-		pret->pnext = 0;
-	}
-	cb_lockexchange(m_handlelock, 0);
-	return pret;
-}
-template<typename t>
-void cb_timerpolingex<t>::add(telem<t>* phead, telem<t>* ptail)
-{
-	if(!phead)
-		return ;
-	while(cb_lockcompareexchange(m_handlelock, 1, 0) == 1);
-	if(ptail){
-		if(m_handlehead){
-			ptail->pnext = m_handlehead;
-			m_handlehead->pprev = ptail;
-		}
-	}
-	else{
-		if(m_handlehead){
-			phead->pnext = m_handlehead;
-			m_handlehead->pprev = phead;
-		}
-	}
-	m_handlehead = phead;
-	cb_lockexchange(m_handlelock, 0);
-}
-template<typename t>
-void cb_timerpolingex<t>::releasehandletelem(void)
-{
-	if(m_handlehead)
-	{
-		while(cb_lockcompareexchange(m_handlelock, 1, 0) == 1);
-		telem<t>* pdel = m_handlehead;
-		while(pdel)
-		{
-			m_handlehead = m_handlehead->pnext;
-			if(m_handlehead){
-				m_handlehead->pprev = 0;
-			}
-			pdel->pnext = 0;
-			m_tpool.delobj(pdel);
-			pdel = m_handlehead;
-		}
-		m_handlehead = 0;
-		cb_lockexchange(m_handlelock, 0);
-	}
-}
-template<typename t>
-void* cb_timerpolingex<t>::invokeex(void* pparams)
-{
-	cb_timerpolingex<t>* pthis = (cb_timerpolingex<t>*)pparams;
-	if(!pthis){
-		return (void*)-1;
-	}
-	pthis->invokeex();
-	return 0;
-}
-template<typename t>
-pollnodeex<t>* cb_timerpolingex<t>::createloop(int ipolingcount)
-{
-	if(ipolingcount <= 0)
-		return 0;
-	ipolingcount += 1;//
-	m_pdel = new(std::nothrow) pollnodeex<t>[ipolingcount];
-	if(!m_pdel)
-		return 0;
-	memset(m_pdel, 0, sizeof(pollnodeex<t>) * ipolingcount);
-	pollnodeex<t>* ptail = 0;
-	for(int i = 0; i < ipolingcount - 1; ++i)
-	{
-		m_phead = &m_pdel[i]; ptail = &m_pdel[i + 1];
-		m_phead->m_pnext = ptail;
-		ptail->m_pprev = m_phead;
-	}
-	ptail->m_pnext = m_pdel;
-	m_pdel->m_pprev = ptail;
-	m_phead = m_pdel;
-	return m_phead;
 }
 
 /*
@@ -1680,7 +1628,7 @@ void* proc2(void* p)
 	}
 	return 0;
 }
-cb_space_poling::cb_timerpolingserver s;
+cb_space_polling::cb_timerpollingserver s;
 s.start(1000, 1, proc2);
 for(int i = 0; i < 100000; ++i){
 	cb* pz = cb_pool.newobj();
@@ -1697,33 +1645,32 @@ for(int i = 0; i < 100000; ++i){
 getchar();
 s.stop();
 */
-struct pollnodeserver;
-struct serverbase
+struct pollingnodeex;
+struct cb_base
 {
-	serverbase():m_nlock(0),m_pprev(0),m_pnext(0){}
+	cb_base():m_nlock(0),m_pprev(0),m_pnext(0){}
 	cb_lock_ul m_nlock;
-	serverbase* m_pprev;
-	serverbase* m_pnext;
-	pollnodeserver* m_pnode;
+	cb_base* m_pprev;
+	cb_base* m_pnext;
+	pollingnodeex* m_pnode;
 };
-struct pollnodeserver
+struct pollingnodeex
 {
-	pollnodeserver():m_pbase(0),m_nlock(0),m_pprev(0),m_pnext(0){}
-	serverbase* m_pbase;
+	pollingnodeex():m_pbase(0),m_nlock(0),m_pprev(0),m_pnext(0){}
+	cb_base* m_pbase;
 	cb_lock_ul m_nlock;
-	pollnodeserver* m_pprev;
-	pollnodeserver* m_pnext;
+	pollingnodeex* m_pprev;
+	pollingnodeex* m_pnext;
 };
-volatile static unsigned long count = 0;
-class cb_timerpolingserver
+class cb_timerpollingex
 {
 public:
-	cb_timerpolingserver():m_proc(0),m_pnodehead(0),m_pdel(0){}
-	virtual ~cb_timerpolingserver(){stop();}
+	cb_timerpollingex():m_proc(0),m_pnodehead(0),m_pdel(0){}
+	virtual ~cb_timerpollingex(){stop();}
 public:
 	static void* invoke(void* pparams)
 	{
-		cb_timerpolingserver* pthis = (cb_timerpolingserver*)pparams;
+		cb_timerpollingex* pthis = (cb_timerpollingex*)pparams;
 		pthis->invoke();
 		return 0;
 	}
@@ -1739,11 +1686,10 @@ public:
 		m_proc = _proc;
 		return m_timer.start(idelaytime/ipolingcount, invoke, this);
 	}
-	int add(serverbase* padd)
+	int add(cb_base* padd)
 	{
 		if(!padd) return -1;
-		cb_lockexadd(count, 1);
-		pollnodeserver* pnode = m_pnodehead->m_pprev;
+		pollingnodeex* pnode = m_pnodehead->m_pprev;
 		while(cb_lockcompareexchange(pnode->m_nlock, 1, 0) == 1) pnode = m_pnodehead->m_pprev;
 		{
 			while(cb_lockcompareexchange(padd->m_nlock, 1, 0) == 1);
@@ -1760,12 +1706,12 @@ public:
 		cb_lockexchange(pnode->m_nlock, 0);
 		return 0;
 	}
-	int del(serverbase* pdel)
+	int del(cb_base* pdel)
 	{
 		if(!pdel) return -1;
 		if(pdel->m_pnode)
 		{
-			pollnodeserver *pnode = pdel->m_pnode;
+			pollingnodeex *pnode = pdel->m_pnode;
 			while(cb_lockcompareexchange(pnode->m_nlock, 1, 0) == 1);
 			{
 				while(cb_lockcompareexchange(pdel->m_nlock, 1, 0) == 1);
@@ -1804,10 +1750,10 @@ private:
 	{
 		while(cb_lockcompareexchange(m_pnodehead->m_nlock, 1, 0) == 1);
 		{
-			serverbase* phead = m_pnodehead->m_pbase;
+			cb_base* phead = m_pnodehead->m_pbase;
 			while(phead)
 			{
-				serverbase* pdel = phead;
+				cb_base* pdel = phead;
 				while(cb_lockcompareexchange(pdel->m_nlock, 1, 0) == 1);
 				phead = phead->m_pnext;
 				if(phead)
@@ -1816,26 +1762,25 @@ private:
 				pdel->m_pnode = 0;
 				pdel->m_pnext = 0;
 				cb_lockexchange(pdel->m_nlock, 0);
-				cb_lockexadd(count, -1);
 				m_proc(pdel);
 			}
 			m_pnodehead->m_pbase = 0;
-			pollnodeserver* pnode = m_pnodehead;
+			pollingnodeex* pnode = m_pnodehead;
 			m_pnodehead = m_pnodehead->m_pnext;
 			cb_lockexchange(pnode->m_nlock, 0);
 		}
 		return 0;
 	}
-	pollnodeserver* createloop(int ipolingcount)
+	pollingnodeex* createloop(int ipolingcount)
 	{
 		if(ipolingcount <= 0)
 			return 0;
 		ipolingcount += 1;//
-		m_pdel = new(std::nothrow) pollnodeserver[ipolingcount];
+		m_pdel = new(std::nothrow) pollingnodeex[ipolingcount];
 		if(!m_pdel)
 			return 0;
-		memset(m_pdel, 0, sizeof(pollnodeserver) * ipolingcount);
-		pollnodeserver* ptail = 0;
+		memset(m_pdel, 0, sizeof(pollingnodeex) * ipolingcount);
+		pollingnodeex* ptail = 0;
 		for(int i = 0; i < ipolingcount - 1; ++i)
 		{
 			m_pnodehead = &m_pdel[i]; ptail = &m_pdel[i + 1];
@@ -1849,8 +1794,8 @@ private:
 	}
 private:
 	pvoid_proc_pvoid m_proc;
-	pollnodeserver* m_pnodehead;
-	pollnodeserver* m_pdel;
+	pollingnodeex* m_pnodehead;
+	pollingnodeex* m_pdel;
 	cb_space_timer::cb_timer m_timer;
 };
 };
@@ -4013,6 +3958,7 @@ namespace cb_space_thread
 
 namespace cb_space_server
 {
+#ifdef WIN32
 #define cb_io_pending WSA_IO_PENDING
 	typedef OVERLAPPED cb_overlapped;
 	typedef enum io_type
@@ -4156,9 +4102,9 @@ namespace cb_space_server
 		LPFN_ACCEPTEX				m_lpfnacceptex;
 		LPFN_GETACCEPTEXSOCKADDRS	m_lpfngetacceptexsockaddrs;
 		LPFN_DISCONNECTEX			m_lpfndisconnectex;
-		cb_space_poling::cb_timerpolingex<psock_context> m_apoling;
+		cb_space_polling::cb_timerpolling2 m_apoling;
 	};
-
+#endif
 	class epoll_coderorz{};
 };
 
