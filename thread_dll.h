@@ -5,6 +5,7 @@
 //////////////////////////////////include///////////////////////////////////////
 
 #include <map>
+#include <vector>
 
 #ifdef WIN32 //iocp
 	#include <winsock2.h>
@@ -3877,6 +3878,714 @@ namespace cb_space_algorithm
 				delete[] ptarr, ptarr = 0;
 		}
 	};
+
+	//AVL-Tree
+	template<class Key, class Value>
+	class AvlEntry
+	{
+		public:
+			AvlEntry() {}
+			AvlEntry(const Key& k, const Value& v)
+				:	key(k), value(v)
+			{}
+        
+		public:
+			Key key;
+			Value value;
+	};
+
+	template<class Key, class Value>
+	class AvlNode
+{
+    private:
+        typedef AvlNode<Key, Value> Node;
+        typedef AvlEntry<Key, Value> Entry;
+
+        enum { LEFT = 0, RIGHT = 1 };
+        
+    public:
+        AvlNode(Node * parentNode = NULL)
+            :	parent(parentNode), balance(0)
+        {
+            child[LEFT] = NULL; child[RIGHT] = NULL;
+        }
+        
+        AvlNode(const Key& k, const Value& v, Node * parentNode = NULL)
+            :	entry(k, v), parent(parentNode), balance(0)
+        {
+            child[LEFT] = NULL; child[RIGHT] = NULL;	
+        }
+    
+    public:
+        void setLeft(Node * node) { setChild(node, LEFT); }
+        void setRight(Node * node) { setChild(node, RIGHT); }
+        void setChild(Node * node, unsigned int index)
+        {
+            child[index] = node;
+            if(node)
+                node->parent = this;
+        }
+        void replaceChild(Node * oldChild, Node * newChild)
+        {
+            setChild(newChild, getChildIndex(oldChild));
+        }
+
+        bool hasChildren() { return child[LEFT] != NULL || child[RIGHT] != NULL; }
+        bool hasLeftChild() { return child[LEFT] != NULL; }
+        bool hasRightChild() { return child[RIGHT] != NULL; }
+        
+        Node * getLeft() { return getChild(LEFT); }
+        const Node * getLeft() const { return getChild(LEFT); }
+        Node * getRight() { return getChild(RIGHT); }
+        const Node * getRight() const { return getChild(RIGHT); }
+        Node * getChild(unsigned int index) { return child[index]; }
+        const Node * getChild(unsigned int index) const { return child[index]; }
+    
+        bool isLeftChild(const Node * node) const { return getChildIndex(node) == LEFT; }
+        bool isRightChild(const Node * node) const { return getChildIndex(node) == RIGHT; }
+        unsigned int getChildIndex(const Node * node) const
+        {
+            for(unsigned int i = 0; i < 2; i++)
+                if(node == child[i])
+                    return i;
+            
+            throw new std::runtime_error("AvlNode::getChildIndex(Node *) could not find specified node.");
+        }
+
+        Value getValue() const { return entry.value; }
+        Value * getValuePtr() { return &entry.value; }
+        Value& getValueRef() { return entry.value; }
+        const Value& getValueRef() const { return entry.value; }
+        Key getKey() { return entry.key; }
+        
+    public:
+        Entry entry;
+        
+        Node * child[2];
+        Node * parent;
+        
+        /**
+         *	The balance factor of a node is defined as the difference in height of 
+         *	its right subtree and leftsubtree.
+         *
+         *		balance(node) = height(node->right) - height(node->left);
+         */
+        int balance;
+	};
+
+	template<class Key, class Value, class Compare = std::less<Key> >
+	class AvlTree
+	{
+    protected:
+        typedef AvlTree<Key, Value, Compare> Tree;
+        typedef AvlNode<Key, Value> Node;
+        
+    public:
+        AvlTree() : _root(NULL), _size(0) {}
+    
+    public:
+        /**
+         *	Returns true if the key in the new node is strictly less than the
+         *	key in the specified subtree's root, and false otherwise.
+         */
+        bool lessThan(const Node * newNode, const Node * subtree) const
+        {
+            return _compare(newNode->entry.key, subtree->entry.key);
+        }
+        
+        /**
+         *	Returns true if the key in the first node is equal to the
+         *	key in the second node, and false otherwise.
+         */
+        bool equal(const Node * first, const Node * second) const
+        {
+            return !lessThan(first, second) && !lessThan(second, first);
+        }
+        
+        /**
+         *	Returns true if the key in the first node is greatert than the
+         *	key in the second node, and false otherwise.
+         */
+        bool greaterThan(const Node * first, const Node * second) const
+        {
+            bool firstNotLessThanSecond = !lessThan(first, second);
+            bool secondNotLessThanFirst = !lessThan(second, first);
+            bool notEqual = !(firstNotLessThanSecond && secondNotLessThanFirst);
+            return notEqual && firstNotLessThanSecond;
+        }
+        
+    protected:
+        /**
+         *	Inserts the new node into the AVL tree. First, it finds the spot in 
+         *	the tree for the new node. Second, it updates the balance factors
+         *	of all the nodes down the path from the root to the new node. Third,
+         *	it calls avlBalance to check if the tree become unbalanced and
+         *	rebalance it.
+         */
+        void avlInsert(Node * newNode)
+        {
+            /**
+             *	Go down through the tree and insert the new node as a leaf.
+             */
+            Node * it = _root, * parent;
+            int idx;
+            
+            do
+            {
+                parent = it;
+                // TODO: duplicate keys handle
+                idx = lessThan(newNode, it) ? 0 : 1;
+                
+                it = it->child[idx];
+            } while(it);
+            
+            /**
+             *	We found the place for the new node in the tree.
+             */
+            parent->setChild(newNode, idx);
+            
+            /**
+             *	Now we must update the balances of all the ancestors of our new node,
+             *	until one of the new balance factors becomes zero or we reach the root node.
+             *
+             *	We also stop when we update a balance to 2 or -2 because this balance will
+             *	become 0 after rebalancing, which implies higher ancestors will keep their
+             *	current balance factors.
+             */
+            Node * ancestor = newNode;
+            Node * child;
+            
+            do {
+                child = ancestor;
+                ancestor = ancestor->parent;
+                
+                ancestor->balance += ancestor->isLeftChild(child) ? -1 : 1;
+                
+            } while((ancestor->balance == 1 || ancestor->balance == -1) && ancestor != _root);
+            
+            /**
+             *	Balance the tree, unless the newly inserted node does not have a ancestor,
+             *	in which case the tree is too small to be rebalanced.
+             */
+            if(newNode->parent != _root)
+                avlBalance(ancestor);
+        }
+        
+        /**
+         *	Checks if there are any nodes with balance factors of 2 or -2, in which case
+         *	the subtree needs to be rotated at that node.
+         *
+         *	The rotation and balance factor "magic" is explained in the documentation thoroughly.
+         */
+        void avlBalance(Node * ancestor)
+        {
+            if(ancestor->balance == -2)
+            {
+                if(ancestor->getLeft()->balance == -1)
+                {
+                    avlSingleRotation(ancestor, 0);
+                }
+                else if(ancestor->getLeft()->balance == 1)
+                {
+                    avlDoubleRotation(ancestor, 0);
+                }
+                else
+                {
+                    throw new std::runtime_error("AvlTree::avlBalance(Node *) inconsistency detected.");
+                }
+            }
+            else if(ancestor->balance == 2)
+            {
+                if(ancestor->getRight()->balance == 1)
+                {
+                    avlSingleRotation(ancestor, 1);
+                }
+                else if(ancestor->getRight()->balance == -1)
+                {
+                    avlDoubleRotation(ancestor, 1);
+                }
+                else
+                {
+                    throw new std::runtime_error("AvlTree::avlBalance(Node *) inconsistency detected.");
+                }
+            }
+        }
+        
+        /**
+         *	Direction is 0 for right-right rotation and 1 for left-left.
+         */
+        void avlSingleRotation(Node * p, unsigned int dir)
+        {
+            /**
+             *	If we're rotating at the root of the tree then we need to reset 
+             *	the _root pointer once we're done.
+             */
+            unsigned int opposed = dir ? 0 : 1;
+            
+            bool setNewRoot = (p == _root);
+            Node * q = p->child[dir];
+            
+            /**
+             *	"Rewire" the tree accordingly.
+             */
+            p->setChild(q->child[opposed], dir);
+            
+            Node * oldRootParent = p->parent;
+            if(oldRootParent)
+                oldRootParent->replaceChild(p, q);
+
+            q->setChild(p, opposed);
+            
+            if(setNewRoot)
+            {
+                _root = q;
+                _root->parent = 0;
+            }
+            
+            p->balance = 0;
+            q->balance = 0;
+        }
+        
+        /**
+         *	Direction is 0 for left-right rotation and 1 for right-left rotation.
+         */
+        void avlDoubleRotation(Node * p, unsigned int dir)
+        {
+            unsigned int opposed = dir ? 0 : 1;
+            bool setNewRoot = (p == _root);
+            
+            /**
+             *	The new subtree after the rotation will be rooted at a different
+             *	node and will have a left and a right subtree.
+             */
+            Node * q = p->getChild(dir);
+            Node * r = q->getChild(opposed);
+            
+            /**
+             *	We are now ready to "rewire" the subtree.
+             */
+            Node * pParent = p->parent;
+            if(pParent)
+                pParent->replaceChild(p, r);
+            
+            p->setChild(r->getChild(opposed), dir);
+            q->setChild(r->getChild(dir), opposed);
+            
+            r->setChild(q, dir);
+            r->setChild(p, opposed);
+            
+            if(setNewRoot)
+            {
+                _root = r;
+                _root->parent = 0;
+            }
+            
+            /**
+             *	Recompute the new balance factors. There are a few cases depending
+             *	on the old balance factor of R.
+             */
+            if(r->balance == 0)
+            {
+                r->getLeft()->balance = 0;
+                r->getRight()->balance = 0;
+            }
+            else if(r->balance == -1)
+            {
+                r->getLeft()->balance = 0;
+                r->getRight()->balance = 1;
+            }
+            else /* if(r->balance == 1) */
+            {
+                r->getLeft()->balance = -1;
+                r->getRight()->balance = 0;
+            }
+            
+            r->balance = 0;
+        }
+        
+        unsigned int avlHeight(const Node * root) const {
+            if(root)
+                return 1 + std::max(avlHeight(root->getLeft()), avlHeight(root->getRight()));
+            else
+                return 0;
+        }
+
+    public:
+        /**
+         *	Looks for the value associated with the specified key in the tree
+         *	and returns a pointer to the value or null if such a (key, value) 
+         *	pair was not inserted in the tree.
+         */
+        Value * find(const Key& key)
+        {
+            assert((_root != NULL && _size != 0) || (_size == 0 && _root == NULL));
+            Node * it = _root;
+
+            if(_root == NULL)
+                return NULL;
+            
+            do
+            {
+                if(_compare(key, it->entry.key))
+                    it = it->child[0];
+                else if(_compare(it->entry.key, key))
+                    it = it->child[1];
+                else
+                    return &(it->entry.value);
+            } while(it);
+            
+            return NULL;
+        }
+        
+        const Value * find(const Key& key) const
+        {
+            return find(key);
+        }
+        
+        /**
+         *	Inserts the specified (key, value) pair into the tree.
+         */
+        void insert(const Key& key, const Value& value)
+        { 
+            _size++;
+            
+            /**
+             *	The basic case arises when the tree is empty. In this case
+             *	we'll create a new node and set it as the root of the tree.
+             */
+            if(_root == NULL)
+                _root = new Node(key, value);
+            else
+            {
+                /**
+                 *	Create an isolated node and insert it into the tree.
+                 */
+                avlInsert(new Node(key, value));
+            }
+        }
+        
+        Value remove(const Key& key)
+        {
+            key;
+            throw new std::runtime_error("Not implemented");
+        }
+
+        /**
+         *	Returns the number of (key, value) pairs stored into the tree.
+         */
+        unsigned long size() const { return _size; }
+        
+        unsigned int height() const
+        {
+            return avlHeight(_root);
+        }
+
+        Node * getRoot() { return _root; }
+        const Node * getRoot() const { return _root; }
+
+    protected:
+        /**
+         *	The comparator object takes in two keys as parameters and returns
+         *	true if the first one is less than the second one and false otherwise.
+         */
+        Compare _compare;
+        
+        /**
+         *	Pointer to the root of the tree.
+         */
+        Node * _root;
+        
+        /**
+         *	The size of the tree -- the number of nodes.
+         */
+        unsigned long _size;
+	};
+
+	//typedef AvlNode<long, long> Node;
+	//typedef AvlTree<long, long> Tree;
+	//class AvlTests
+	//{
+	//private:
+	//	bool _checkIntegrity;
+	//	unsigned long _testSize, _range;
+
+	//public:
+	//	AvlTests(bool checkIntegrity, unsigned long testSize)
+	//		: _checkIntegrity(checkIntegrity), _testSize(testSize), _range(testSize*testSize)
+	//	{
+	//		//srand(time(0));
+	//	}
+
+	//public:
+	//	void testComparator(){
+	//		Tree tree;
+
+	//		for(int i = 1; i < 1024; i++) {
+	//			std::unique_ptr<Node> n1(new Node(i, 0));
+	//			std::unique_ptr<Node> n2(new Node(i + 1, 0));
+
+	//			if(!tree.lessThan(n1.get(), n2.get()))
+	//				throw new std::runtime_error("lessThan is not working: smaller item reported greater");
+	//			if(tree.lessThan(n2.get(), n1.get()))
+	//				throw new std::runtime_error("lessThan is not working: greater item reported smaller");
+	//			if(tree.lessThan(n1.get(), n1.get()))
+	//				throw new std::runtime_error("lessThan is not working: equal item reported smaller");
+	//			if(!tree.equal(n1.get(), n1.get()))
+	//				throw new std::runtime_error("equal is not working: equal items reported different");
+	//			if(tree.equal(n1.get(), n2.get()))
+	//				throw new std::runtime_error("equal is not working: different items reported equal");
+	//			if(!tree.greaterThan(n2.get(), n1.get()))
+	//				throw new std::runtime_error("greaterThan is not working: greater item reported smaller");
+	//			if(tree.greaterThan(n1.get(), n2.get()))
+	//				throw new std::runtime_error("greaterThan is not working: smaller item reported greater");
+	//			if(tree.greaterThan(n1.get(), n1.get()))
+	//				throw new std::runtime_error("greaterThan is not working: equal item reported greater");
+	//		}
+	//	}
+	//	void testHeight(){
+	//		Tree tree;
+
+	//		tree.insert(1, 1);
+	//		if(tree.height() != 1)
+	//			throw new std::runtime_error("Tree with one node should have height 1");
+
+	//		tree.insert(2, 1);
+	//		if(tree.height() != 2)
+	//			throw new std::runtime_error("Tree with two nodes should have height 2");
+
+	//	}
+	//	void testRandomInserts(){
+	//		Tree tree;
+
+	//		//loginfo << "Inserting " << _testSize << " random numbers ranging from 0 to " << _range - 1 << "..." << endl;
+
+	//		long numCollisions = 0;
+
+	//		for(unsigned long i = 0; i < _testSize; i++)
+	//		{
+	//			long num = rand() % _range;
+
+	//			if(i == 0 || (i + 1) % 1000 == 0) {
+	//				//const char * optMsg = "";
+	//				//if(_checkIntegrity)
+	//				//	optMsg = ", checking integrity every insert w/ O(n) overhead";
+	//				//logtrace << "Insert #" << i+1 << ": " << num << optMsg << endl;
+	//			}
+
+	//			if(tree.find(num) == NULL) {
+	//				tree.insert(num, num);
+	//				//if(_checkIntegrity && !testIntegrity(tree))
+	//				//	throw new std::runtime_error("Integrity check failed while inserting random numbers.");
+
+	//			} else {
+	//				//logdbg << num << " already inserted in tree." << endl;
+	//				numCollisions++;
+	//			}
+	//		}
+
+	//		if(numCollisions > 0){
+	//			//logdbg << "Supposed to insert " << _testSize << " numbers, but got " << numCollisions << " collision(s)." << endl;
+	//		}
+	//		if(_testSize - numCollisions != tree.size()) {
+	//			throw new std::runtime_error("Tree size does not match expected size after insertions");
+	//		}
+	//	}
+	//	void testRemoves(){}
+
+	//	void printTree(const Tree& tree, std::ostream& out, size_t maxDigits) const
+	//	{
+	//		maxDigits++;
+	//		// Even max digits makes layout simpler
+	//		if(maxDigits % 2) maxDigits++;
+
+	//		std::vector<std::pair<const Node *, int> > nodes;
+
+	//		// We need to know the tree's height and the max number of digits 
+	//		// in the numbers for nice formatting.
+	//		int height = tree.height();
+	//		int prevLevel = 0;
+
+	//		// We start with the root node, at level 1
+	//		nodes.push_back(std::pair<const Node *, int>(tree.getRoot(), prevLevel));
+
+	//		size_t i = 0;
+	//		unsigned long maxNodes = pow(2.0, height) - 1;
+	//		unsigned long numInserted = 1;
+
+	//		// last level has 2^(height-1) nodes
+	//		unsigned long lastLevelNumNodes = (maxNodes + 1) / 2;
+	//		unsigned long nodeWidth = maxDigits * pow(2.0, height - 1);
+	//		unsigned long spacing = (nodeWidth - maxDigits) / 2;
+
+	//		//logdbg << "-----------" << endl;
+	//		//logdbg << "Tree size: " <<  tree.size() << endl;
+	//		//logdbg << "Tree height: " << height << endl;
+	//		//logdbg << "Max # of nodes: "<< maxNodes << endl;
+	//		//logdbg << "Last level # of nodes: " << lastLevelNumNodes << endl;
+	//		//logdbg << "Max digits: " << maxDigits << endl;
+	//		//logdbg << "Initial node width " << nodeWidth << " and spacing " << spacing << endl;
+
+	//		//out << endl;
+	//		while(numInserted < maxNodes)
+	//		{
+	//			std::pair<const Node *, int> p = nodes.at(i);
+	//			const Node * next = p.first;
+	//			int level = p.second + 1;
+
+	//			// We push nodes even if they are NULL, since we need to print the whitespace
+	//			nodes.push_back(std::pair<const Node *, int>(next ? next->getLeft()  : NULL, level));
+	//			nodes.push_back(std::pair<const Node *, int>(next ? next->getRight() : NULL, level));
+
+	//			if(level != 1 && level != prevLevel) {
+	//				prevLevel = level;
+	//				//out << endl;
+	//				nodeWidth /= 2;
+	//				spacing = (nodeWidth - maxDigits) / 2;
+	//			}
+
+	//			if(next) {
+	//				//out << setw(spacing) << "";
+	//				//out << setw(maxDigits) << next->getValue();
+	//				//out << setw(spacing) << "";
+	//			} else {
+	//				//out << setw(spacing) << "";
+	//				//out << setw(maxDigits) << ".";
+	//				//out << setw(spacing) << "";
+	//			}
+
+	//			i++;
+	//			numInserted += 2;
+	//		}
+
+	//		// Print the last level
+	//		while(i < numInserted) {
+	//			std::pair<const Node *, int> p = nodes.at(i);
+	//			const Node * next = p.first;
+	//			int level = p.second + 1;
+
+	//			if(level != prevLevel) {
+	//				prevLevel = level;
+	//				//out << endl;
+	//				nodeWidth /= 2;
+	//				spacing = (nodeWidth - maxDigits) / 2;
+	//			}
+
+	//			if(next) {
+	//				//out << setw(spacing) << "";
+	//				//out << setw(maxDigits) << next->getValue();
+	//				//out << setw(spacing) << "";
+	//			} else {
+	//				//out << setw(spacing) << "";
+	//				//out << setw(maxDigits) << ".";
+	//				//out << setw(spacing) << "";
+	//			}
+	//			i++;
+	//		}
+	//		//out << endl << endl;
+
+	//		//out << "All done! " << nodes.size() << " nodes inserted" << endl;
+	//	}
+	//	void printInorder(const Tree& tree, std::ostream& out) const { avlPrintInorder(tree.getRoot(), out); }
+
+	//private:
+	//	bool testIntegrity(const Tree& tree) const
+	//	{
+	//		Node min1(LONG_MIN, 0);
+	//		Node max1(LONG_MAX, 0);
+
+	//		unsigned long treeSize = 0;
+	//		long h = 0;
+	//		bool passed = avlCheckBST(tree, tree.getRoot(), &min1, &max1, h, treeSize);
+
+	//		if(treeSize != tree.size()) {
+	//			//logerror << "Actual tree size of " <<  tree.size() << " nodes differs from computed one of " << treeSize << " nodes." << endl;
+	//			passed = false;
+	//		}
+
+	//		if(h != tree.height()) {
+	//			//logerror << "avlCheckBST computed different height: " << h << " vs. real height of " << tree.height() << endl;
+	//			passed = false;
+	//		}
+
+	//		return passed;
+	//	}
+	//	void avlPrintInorder(const Node * root, std::ostream& out) const
+	//	{
+	//		if(root)
+	//		{
+	//			avlPrintInorder(root->child[0], out);
+	//			//out << root->entry.key << " (b: " << root->balance << ")\n";
+	//			avlPrintInorder(root->child[1], out);
+	//		}
+	//	}
+	//	bool avlCheckBST(const Tree& tree, const Node * root, const Node * min, const Node * max, long& height, unsigned long& currTreeSize) const
+	//	{
+	//		if(root == NULL) {
+	//			return true;
+	//		}
+
+	//		currTreeSize++;
+	//		const Node * left = root->getLeft();
+	//		const Node * right= root->getRight();
+
+	//		// Check BST invariant left_subtree(r) < r && right_subtree(r) > r
+	//		if(tree.lessThan(root, min) || tree.greaterThan(root, max)) {
+	//			//logerror << "Found node in subtree that does not respect BST property" << endl;
+	//			return false; 
+	//		}
+
+	//		// Check that left child is NOT greater than the root
+	//		if(left && tree.greaterThan(left, root))
+	//		{
+	//			//logerror << "Left child of " << root->entry.key << " is "  << left->entry.key;
+	//			//logerror << ", not smaller." << std::endl;
+	//			return false;
+	//		}
+
+	//		// Check that right child is NOT less than the root
+	//		if(right && tree.lessThan(right, root))
+	//		{
+	//			//logerror << "Right child of " << root->entry.key << " is "  << right->entry.key;
+	//			//logerror << ", not greater." << std::endl;
+	//			return false;
+	//		}
+
+	//		// Check that the children's parent pointers point to the parent node they are descended from
+	//		for(int i = 0; i < 2; i++){
+	//			if(root->getChild(i) && root->getChild(i)->parent != root)
+	//			{
+	//				//logerror << "Node with inconsistent parent pointer in child # " << i << " node: " << root->entry.key << std::endl;
+	//				return false;
+	//			}
+
+	//			// Check balance factors (stored vs. calculated) 
+	//			int balance = root->balance;
+	//			int absBalance = balance < 0 ? -balance : balance;
+
+	//			if(absBalance > 1)
+	//			{
+	//				//logerror << "Unbalanced at node: " << root->entry.key << std::endl;
+	//				return false;
+	//			}
+
+	//			// Since the root node is not NULL, increase the height of the subtrees
+	//			long leftHeight = height + 1, rightHeight = height + 1;
+	//			bool passed = avlCheckBST(tree, left,  min, root, leftHeight,  currTreeSize) && avlCheckBST(tree, right, root, max, rightHeight, currTreeSize);
+
+	//			height = leftHeight > rightHeight ? leftHeight : rightHeight;
+
+	//			if((rightHeight - leftHeight) != balance)
+	//			{
+	//				//logerror
+	//				//	<< "Bad balance at node '" << root->entry.key
+	//				//	<< "'. Real balance is "  << leftHeight - rightHeight
+	//				//	<< " != stored balance of " << balance << std::endl;
+	//				return false;
+	//			}
+
+	//			return passed;
+	//	}
+	//};
 };
 
 namespace cb_space_thread
@@ -4052,7 +4761,7 @@ namespace cb_space_server
 		io_type_dofr,
 		io_type_recv,
 	}io_type;
-	typedef struct sock_context
+	typedef struct sock_context : public cb_space_polling::cb_base
 	{
 
 		cb_socket sock;
@@ -4060,7 +4769,8 @@ namespace cb_space_server
 	typedef struct listen_io_context
 	{
 		cb_overlapped ol;
-
+		cb_socket liosock;
+		WSABUF liobuf;
 	}listen_io_context,*plisten_io_context;
 	typedef struct io_context
 	{
@@ -4077,11 +4787,56 @@ namespace cb_space_server
 	public:
 		void start(void)
 		{
-			m_apoling.start(3000, 10, accept_timeout, 1);
+			m_iocppolling.start(3000, 10, accept_timeout);
+
+			WSADATA wsaData; ::WSAStartup(MAKEWORD(2, 2), &wsaData);
+
+			m_hiocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 0);
+			m_slistensock = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
+			CreateIoCompletionPort((HANDLE)m_slistensock, m_hiocp, (DWORD)0, 0);
+
+			DWORD dwBytes(0);
+			GUID disconnectex = WSAID_DISCONNECTEX;
+			WSAIoctl(m_slistensock, SIO_GET_EXTENSION_FUNCTION_POINTER, 
+				&disconnectex, sizeof(disconnectex), &m_lpfndisconnectex, sizeof(m_lpfndisconnectex), 
+				&dwBytes, NULL, NULL);
+			GUID acceptex = WSAID_ACCEPTEX;
+			WSAIoctl(m_slistensock, SIO_GET_EXTENSION_FUNCTION_POINTER, 
+				&acceptex, sizeof(acceptex), &m_lpfnacceptex, sizeof(m_lpfnacceptex), 
+				&dwBytes, NULL, NULL);
+			GUID acceptexsockaddrs = WSAID_GETACCEPTEXSOCKADDRS;
+			WSAIoctl(m_slistensock, SIO_GET_EXTENSION_FUNCTION_POINTER, 
+				&acceptexsockaddrs, sizeof(acceptexsockaddrs), &m_lpfngetacceptexsockaddrs, sizeof(m_lpfngetacceptexsockaddrs), 
+				&dwBytes, NULL, NULL);
+
+			struct sockaddr_in saddr	= {0};
+			saddr.sin_family			= AF_INET;
+			saddr.sin_addr.s_addr		= inet_addr("172.16.40.100");
+			saddr.sin_port				= htons(12345);
+
+			bind(m_slistensock, (struct sockaddr*)&saddr, sizeof(saddr));
+
+			listen(m_slistensock, SOMAXCONN);
+
+			SYSTEM_INFO sysinfo;
+			::GetSystemInfo(&sysinfo);//sysInfo.dwPageSize
+			unsigned long ulcount(sysinfo.dwNumberOfProcessors * 2);
+			while(ulcount--){
+				cb_thread_fd tfd;
+				cb_create_thread(tfd, iocp_proc, this);
+				cb_thread_fail(tfd);
+			}
+
+			while(ulcount++ < 10){
+				plisten_io_context plioc = m_iocp_lioc.newobj();
+				if(plioc)
+					if(postlistenio(plioc) != 0)
+						m_iocp_lioc.delobj(plioc);
+			}
 		}
 		void stop(void)
 		{
-			m_apoling.stop();
+			m_iocppolling.stop();
 		}
 		virtual ~iocp_coderorz(){}
 	public:
@@ -4095,6 +4850,18 @@ namespace cb_space_server
 		}
 		void doaccept(plisten_io_context plisten_ioc)
 		{
+			SOCKADDR_IN* psaddr(0), *pcaddr(0);	int iaddrlen(sizeof(SOCKADDR_IN) + 16), saddrlen(0), caddrlen(0);
+			m_lpfngetacceptexsockaddrs(plisten_ioc->liobuf.buf, 0, iaddrlen, iaddrlen, 
+				(LPSOCKADDR*)&psaddr, &saddrlen, (LPSOCKADDR*)&pcaddr, &caddrlen);
+			//m_syslog.writelog("connect coming ...\n");
+			psock_context psockc = m_iocp_sockc.newobj();
+			if(psockc){
+				
+			}
+			else{
+				//closesock(pListenIoContext->m_listenSock);
+				//pListenIoContext->m_listenSock = INVALID_SOCKET;
+			}
 
 		}
 		void handleiocp(psock_context psockc, pio_context pioc, unsigned long dwbytes)
@@ -4114,7 +4881,7 @@ namespace cb_space_server
 		cb_thread_fd ioport(void){return m_hiocp;}
 	public:
 		static iocp_coderorz& instance(void){static iocp_coderorz ref;return ref;}
-		static unsigned long __stdcall iocp_proc(void* p)
+		static unsigned int __stdcall iocp_proc(void* p)
 		{
 			iocp_coderorz* piocp = (iocp_coderorz*)p; cb_thread_fd hiocp = piocp->ioport();
 			psock_context psockc(0); cb_overlapped* piocp_ol(0); unsigned long dwbytes(0);
@@ -4163,6 +4930,18 @@ namespace cb_space_server
 			return 0;
 		}
 	private:
+		int postlistenio(plisten_io_context plioc)
+		{
+			plioc->liosock = WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED);
+			DWORD dwbytes(sizeof(sockaddr_in) + 16);
+			if(!m_lpfnacceptex(m_slistensock, plioc->liosock, plioc->liobuf.buf, 
+				0, dwbytes, dwbytes, &dwbytes, &plioc->ol) && cb_io_pending != cb_errno)
+			{
+				cb_closesock(plioc->liosock);
+				return -1;
+			}
+			return 0;
+		}
 		int postrecv(psock_context psockc, pio_context pioc)
 		{
 			unsigned long dwbytes(0), dwflags(0);
@@ -4186,7 +4965,10 @@ namespace cb_space_server
 		LPFN_ACCEPTEX				m_lpfnacceptex;
 		LPFN_GETACCEPTEXSOCKADDRS	m_lpfngetacceptexsockaddrs;
 		LPFN_DISCONNECTEX			m_lpfndisconnectex;
-		cb_space_polling::cb_timerpolling2 m_apoling;
+		cb_space_memorypool::obj_pool<listen_io_context> m_iocp_lioc;
+		cb_space_memorypool::obj_pool<sock_context> m_iocp_sockc;
+		cb_space_memorypool::mem_pool m_iocpmem;
+		cb_space_polling::cb_timerpollingex m_iocppolling;
 	};
 #endif
 	class epoll_coderorz{};
