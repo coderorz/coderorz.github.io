@@ -18,6 +18,8 @@
 //////////////////////////////////include///////////////////////////////////////
 
 //////////////////////////////////public////////////////////////////////////////
+typedef volatile unsigned long cb_lock_ul;
+typedef void* cb_pvoid;
 typedef void* (*pvoid_proc_pvoid)(void*);
 
 #ifdef WIN32
@@ -121,7 +123,6 @@ typedef void* (*pvoid_proc_pvoid)(void*);
 //////////////////////////////////file//////////////////////////////////////////
 
 //////////////////////////////////lock//////////////////////////////////////////
-typedef volatile unsigned long cb_lock_ul;
 #ifdef WIN32
 #define cb_lockexchange(k, v) InterlockedExchange(&k, v)
 #define cb_lockcompareexchange(k, v, c) InterlockedCompareExchange(&k, v, c)
@@ -141,10 +142,10 @@ typedef volatile unsigned long cb_lock_ul;
 #include <windows.h>			//for HANDLE
 #include <process.h>			//_beginthreadex
 #define cb_thread_fd HANDLE
-#define cb_create_thread(thread_fd, proc, params) ((thread_fd) = \
+#define cb_thread_create(thread_fd, proc, params) ((thread_fd) = \
 	(cb_thread_fd)_beginthreadex(0, 0, (proc), (params), 0, 0))
 #define cb_thread_fail(thread_fd) (0 == (thread_fd))
-#define cb_close_thread_fd(thread_fd) CloseHandle(thread_fd)
+#define cb_thread_close_fd(thread_fd) CloseHandle(thread_fd)
 #else
 #include <pthread.h>
 #define cb_thread_fd pthread_t
@@ -165,7 +166,7 @@ typedef volatile unsigned long cb_lock_ul;
 #define cb_localip(buf, bufsize, __sockaddr_in){\
 	char* __pip = inet_ntoa(__sockaddr_in.sin_addr); \
 	if(__pip && bufsize > strlen(__pip)) memcpy(buf, __pip, bufsize);}
-#define cb_closesock(sock) {if(sock != -1){closesocket(sock);sock = -1;}}
+#define cb_closesock(sock) {if(sock != -1){closesocket(sock);sock = INVALID_SOCKET;}}
 #define cb_bool_sock_block (cb_errno == WSAEWOULDBLOCK)
 #define cb_ioctlsock ioctlsocket
 #define cb_tm_sendrecv(sock, tmsend, tmrecv) {\
@@ -500,11 +501,11 @@ lab_end:
 		}
 	};
 };
-
 namespace cb_space_memorypool
 {
 	class mem_pool
 	{
+#define __mem_pool_offset__ sizeof(struct mcb_node*)
 		struct mcb_node
 		{
 		public:
@@ -1461,9 +1462,9 @@ public:
 		{
 			cb_thread_fd tfd;
 #ifdef WIN32
-			cb_create_thread(tfd, __cb_poling_proc__, &m_paramsex);
+			cb_thread_create(tfd, __cb_poling_proc__, &m_paramsex);
 #else
-			cb_create_thread(tfd, __cb_poling_proc__, &m_paramsex);
+			cb_thread_create(tfd, __cb_poling_proc__, &m_paramsex);
 #endif
 			if(cb_thread_fail(tfd)){
 				return -3;
@@ -4666,7 +4667,7 @@ namespace cb_space_thread
 	/*
 	void* proc(void*){}
 
-	cb_space_thread::cb_thread th;
+	cb_space_thread::cb_thread_0_0 th;
 	th.start(proc, 0);
 	int j = 0;
 	while(j++ < 10){
@@ -4690,7 +4691,7 @@ namespace cb_space_thread
 			m_procparam._pthis = this;
 
 			cb_thread_fd tfd;
-			cb_create_thread(tfd, __cb_thread_proc__, &m_procparam);
+			cb_thread_create(tfd, __cb_thread_proc__, &m_procparam);
 			if(cb_thread_fail(tfd))
 				return -2;
 
@@ -4749,229 +4750,943 @@ namespace cb_space_thread
 	};
 };
 
+class boob_log
+{
+public:
+	boob_log():lock(0)
+	{
+	}
+
+	~boob_log(){
+		if(strlist.size()){
+			FILE * fp(NULL);
+			int flag = fopen_s(&fp, "D:\\MyLog\\log.txt","a");
+			for(std::vector<std::string>::iterator iter = strlist.begin(); iter != strlist.end(); ++iter){
+				if(fp)
+					fwrite(iter->c_str(), iter->size(), 1, fp);
+			}
+			if(fp){
+				fflush(fp);
+				fclose(fp);
+			}
+		}
+		strlist.clear();
+	}
+	void writelog(std::string str){
+		//return ;
+		while(InterlockedCompareExchange(&lock, 1, 0) == 1);
+		{
+			if(strlist.size() >= 10){
+				FILE * fp(NULL);
+				strlist.push_back(str);
+				int flag = fopen_s(&fp, "D:\\MyLog\\log.txt","a");
+				for(std::vector<std::string>::iterator iter = strlist.begin(); iter != strlist.end(); ++iter){
+					if(fp)
+						fwrite(iter->c_str(), iter->size(), 1, fp);
+				}
+				if(fp){
+					fflush(fp);
+					fclose(fp);
+				}
+				strlist.clear();
+			}
+			else{
+				strlist.push_back(str);
+			}
+		}
+		InterlockedExchange(&lock, 0);
+	}
+private:
+	volatile long lock;
+	std::vector<std::string> strlist;
+};
+
+boob_log  cb_log;
+
 namespace cb_space_server
 {
 #ifdef WIN32
-#define cb_io_pending WSA_IO_PENDING
-	typedef OVERLAPPED cb_overlapped;
-	typedef enum io_type
-	{
-		io_type_null,
-	//	io_type_conn,
-		io_type_dofr,
-		io_type_recv,
-	}io_type;
-	typedef struct sock_context : public cb_space_polling::cb_base
-	{
+	struct node;
 
-		cb_socket sock;
-	}sock_context,*psock_context;
-	typedef struct listen_io_context
+	struct elem
 	{
-		cb_overlapped ol;
-		cb_socket liosock;
-		WSABUF liobuf;
-	}listen_io_context,*plisten_io_context;
-	typedef struct io_context
+		cb_lock_ul   m_nlockelem;
+		struct elem* m_pprevelem;
+		struct elem* m_pnextelem;
+		struct node* m_pbelongnode;
+	};
+
+	class timeoutcallback_i
 	{
-		cb_overlapped ol;
-		io_type iotype;
-		WSABUF iobuf;
-	}io_context,*pio_context;
-#define cb_io_containing_record(p, cb_sname) CONTAINING_RECORD(p, cb_sname, ol);
-	class iocp_coderorz
+	public:
+		virtual int timeout_callback(void*) = 0;
+		virtual int handle_business(char*) = 0;
+	};
+
+	struct node
 	{
-		iocp_coderorz():m_hiocp(0),m_slistensock(~0),m_lpfnacceptex(0),m_lpfngetacceptexsockaddrs(0),m_lpfndisconnectex(0){}
+		cb_lock_ul   m_nlocknode;
+		struct node* m_pprevnode;
+		struct node* m_pnextnode;
+		struct elem* m_pelemhead;
+	};
+
+	typedef class xxx_abc
+	{
+		typedef xxx_abc __cb_class__;
+	public:
+		xxx_abc():m_del(0),m_pnodehead(0),m_tse(0),m_timeout_callback(0){}
+		~xxx_abc()
+		{
+			if(m_tse)
+			{
+				timeKillEvent(m_tse); m_tse = 0;
+				struct node* bhead = 0;
+				while(1)
+				{
+					while(cb_lockcompareexchange(m_pnodehead->m_nlocknode, 1, 0) == 1);
+					while(m_pnodehead->m_pelemhead)
+					{
+						//任何elem的操作都必须先lock node,再操作elem,如果node为空,那么可以直接操作elem
+						//所以此处可以不做elem的lock
+						struct elem* pelem = m_pnodehead->m_pelemhead;
+						m_pnodehead->m_pelemhead = pelem->m_pnextelem;
+						pelem->m_pnextelem = pelem->m_pprevelem = 0;
+						pelem->m_pbelongnode = 0;
+
+						m_timeout_callback->timeout_callback(pelem);
+					}
+					struct node* pnode = m_pnodehead;
+					m_pnodehead = m_pnodehead->m_pnextnode;
+					if(!bhead)
+						bhead = pnode;
+					else if(bhead == m_pnodehead){
+						cb_lockexchange(pnode->m_nlocknode, 0);
+						break;
+					}
+					cb_lockexchange(pnode->m_nlocknode, 0);
+				}
+			}
+
+			m_pnodehead = 0;
+			if(m_del)
+				delete[] m_del, m_del = 0;
+		}
+	public:
+		int start(timeoutcallback_i* pcallback, unsigned int udelay = 1000, unsigned int usize = 10)
+		{
+			if(!pcallback)
+				return -1;
+			m_timeout_callback = pcallback;
+
+			if(!m_pnodehead)
+			{
+				char* p = new(std::nothrow)char[sizeof(struct node) * (usize <= 1 ? usize = 10 : usize)];
+				if(!p)
+					return -1;
+				memset(p, 0, sizeof(struct node) * usize);
+
+				m_del = p;
+				m_pnodehead = (struct node*)p;
+
+				((struct node*)p)[0].m_pprevnode = &((struct node*)p)[usize - 1];
+				((struct node*)p)[usize - 1].m_pnextnode = (struct node*)p;
+				for(unsigned int i = 0; i < usize - 1; ++i)
+				{
+					((struct node*)p)[i].m_pnextnode = &(((struct node*)p)[i + 1]);
+					((struct node*)p)[i + 1].m_pprevnode = &(((struct node*)p)[i]);
+				}
+			}
+
+			m_tse = timeSetEvent(udelay, 1, proc, (DWORD_PTR)this, 1);
+			if(m_tse == 0)
+				return -4;
+			return 0;
+		}
+
+		int add(struct elem* pelem)
+		{
+			//可以确定pelem->m_pbelongnode为空,否则业务异常
+			if(pelem->m_pbelongnode)
+				return -1;
+			struct node* pnode = m_pnodehead->m_pprevnode;
+			while(cb_lockcompareexchange(pnode->m_nlocknode, 1, 0) == 1) pnode = m_pnodehead->m_pprevnode;
+			pelem->m_pbelongnode = pnode;
+			if(pnode->m_pelemhead)
+			{
+				pnode->m_pelemhead->m_pprevelem = pelem;
+				pelem->m_pnextelem = pnode->m_pelemhead;
+			}
+			pnode->m_pelemhead = pelem;
+			cb_lockexchange(pnode->m_nlocknode, 0);
+
+			return 0;
+		}
+
+		int del(struct elem* pelem)
+		{
+			struct node* pnode = pelem->m_pbelongnode;
+			if(!pnode)
+			{
+				//已经被处理掉了,请结合具体业务处理线程分析
+				return -1;
+			}
+			while(cb_lockcompareexchange(pnode->m_nlocknode, 1, 0) == 1);
+			{
+				if(pnode == pelem->m_pbelongnode)
+				{
+					if(pnode->m_pelemhead == pelem)
+					{
+						pnode->m_pelemhead = pelem->m_pnextelem;
+						if(pelem->m_pnextelem)
+							pelem->m_pnextelem->m_pprevelem = 0;
+					}
+					else{
+						pelem->m_pprevelem->m_pnextelem = pelem->m_pnextelem;
+						if(pelem->m_pnextelem)
+							pelem->m_pnextelem->m_pprevelem = pelem->m_pprevelem;
+					}
+					pelem->m_pnextelem = pelem->m_pprevelem = 0;
+					pelem->m_pbelongnode = 0;
+				}
+				else{
+					if(pelem->m_pbelongnode)
+					{
+						//已经切换了所属节点,具体是否为异常,需要结合业务处理线程
+						cb_lockexchange(pnode->m_nlocknode, 0);
+						return -3;
+					}
+					else{
+						//等同于if(!pnode), 只不过是在这之后且在while(cb_lockcompareexchange锁定之前,已经处理掉了
+						cb_lockexchange(pnode->m_nlocknode, 0);
+						return -2;
+					}
+				}
+			}
+			cb_lockexchange(pnode->m_nlocknode, 0);
+			return 0;
+		}
+
+		int exchange_hb(struct elem* pelem)
+		{
+			struct node* pnode = pelem->m_pbelongnode;
+			if(!pnode)
+			{
+				//已经被处理掉了,请结合具体业务处理线程分析
+				return -1;
+			}
+			while(cb_lockcompareexchange(pnode->m_nlocknode, 1, 0) == 1);
+			{
+				if(pnode == pelem->m_pbelongnode)
+				{
+					if(pnode->m_pelemhead == pelem)
+					{
+						pnode->m_pelemhead = pelem->m_pnextelem;
+						if(pelem->m_pnextelem)
+							pelem->m_pnextelem->m_pprevelem = 0;
+					}
+					else{
+						pelem->m_pprevelem->m_pnextelem = pelem->m_pnextelem;
+						if(pelem->m_pnextelem)
+							pelem->m_pnextelem->m_pprevelem = pelem->m_pprevelem;
+					}
+					pelem->m_pnextelem = pelem->m_pprevelem = 0;
+					pelem->m_pbelongnode = 0;
+
+					//重置心跳
+// 					struct node* pprevnode = m_pnodehead->m_pprevnode;
+// 					while(cb_lockcompareexchange(pprevnode->m_nlocknode, 1, 0) == 1) pprevnode = m_pnodehead->m_pprevnode;
+// 					pelem->m_pbelongnode = pprevnode;
+// 					if(pprevnode->m_pelemhead)
+// 					{
+// 						pprevnode->m_pelemhead->m_pprevelem = pelem;
+// 						pelem->m_pnextelem = pprevnode->m_pelemhead;
+// 					}
+// 					pprevnode->m_pelemhead = pelem;
+// 					cb_lockexchange(pprevnode->m_nlocknode, 0);
+				}
+				else{
+					if(pelem->m_pbelongnode)
+					{
+						//已经切换了所属节点,具体是否为异常,需要结合业务处理线程
+						cb_lockexchange(pnode->m_nlocknode, 0);
+						return -3;
+					}
+					else{
+						//等同于if(!pnode), 只不过是在这之后且在while(cb_lockcompareexchange锁定之前,已经处理掉了
+						cb_lockexchange(pnode->m_nlocknode, 0);
+						return -2;
+					}
+				}
+			}
+			cb_lockexchange(pnode->m_nlocknode, 0);
+			return 0;
+		}
+	private:
+		static void __stdcall proc(unsigned int , unsigned int , unsigned long pparams, unsigned long , unsigned long)
+		{
+			__cb_class__* pclass = (__cb_class__*)pparams;
+			pclass->handle();
+			return ;
+		}
+
+		int handle(void)
+		{
+			while(cb_lockcompareexchange(m_pnodehead->m_nlocknode, 1, 0) == 1);
+			while(m_pnodehead->m_pelemhead)
+			{
+				//任何elem的操作都必须先lock node,再操作elem,如果node为空,那么可以直接操作elem, 所以此处可以不做elem的lock
+				struct elem* pelem = m_pnodehead->m_pelemhead;
+				m_pnodehead->m_pelemhead = pelem->m_pnextelem;
+				pelem->m_pnextelem = pelem->m_pprevelem = 0;
+				m_timeout_callback->timeout_callback(pelem);
+				pelem->m_pbelongnode = 0;
+			}
+			struct node* pnode = m_pnodehead;
+			m_pnodehead = m_pnodehead->m_pnextnode;
+			cb_lockexchange(pnode->m_nlocknode, 0);
+			return 0;
+		}
+	private:
+		char* m_del;//申请的内存(需要删除)
+		struct node* m_pnodehead;//超时循环链表头
+		unsigned int m_tse;//超时句柄
+
+		////////////////超时数据回调//////////////
+		timeoutcallback_i* m_timeout_callback;
+	}__cb_class__;
+	
+	//
+	typedef enum IO_TYPE
+	{
+		IO_TYPE_NULL,
+		IO_TYPE_DOFR,
+		IO_TYPE_RECV,
+	}IO_TYPE;
+
+	typedef struct DATA_HEAD
+	{
+		int _DataLength_;
+	}DATA_HEAD, *PDATA_HEAD;
+
+	typedef struct IO_DATA
+	{
+		char* _pIOData_;
+		int _IODataLen_;
+		int _IODataIndex_;
+
+		struct IO_DATA* _pIODataNext_;
+	}IO_DATA, *PIO_DATA;
+
+	typedef struct SOCK_CONTEXT : elem
+	{
+		int AddIOCount(void)
+		{
+			int iret = 0;
+			while(cb_lockcompareexchange(_IOC_Lock_, 1, 0) == 1);
+			iret = (++_IOC_Count_);
+			cb_lockexchange(_IOC_Lock_, 0);
+			return iret;
+		}
+		int DelIOCount(void)
+		{
+			int iret = 0;
+			while(cb_lockcompareexchange(_IOC_Lock_, 1, 0) == 1);
+			if(_IOC_Count_ > 0){
+				iret = (--_IOC_Count_);
+			}
+			else{
+				iret = -1;//错误,代表取得此值的线程不需要处理此 SOCKCONTEXT
+			}
+			cb_lockexchange(_IOC_Lock_, 0);
+			return iret;
+		}
+		int GetIOCount(void)
+		{
+			int iret = 0;
+			while(cb_lockcompareexchange(_IOC_Lock_, 1, 0) == 1);
+			iret = _IOC_Count_;
+			cb_lockexchange(_IOC_Lock_, 0);
+			return iret;
+		}
+		cb_lock_ul _IOC_Count_;
+		cb_lock_ul _IOC_Lock_;
+
+
+// 		int AddRecvBuf(char* pRecvBuf, int nBufLen)
+// 		{
+// 			if(!pRecvBuf || nBufLen <= 0){
+// 				return -1;
+// 			}
+// 			int iRet = 0;
+// 			while(cb_lockcompareexchange(_IOData_Lock_, 1, 0) == 1);
+// 			if(_pIODataRecvHead_)
+// 			cb_lockexchange(_IOData_Lock_, 0);
+// 			return iRet;
+// 		}
+// 		int AddIOData(char* pData, int nDataLen)
+// 		{
+// 			if(!pData || nDataLen <= 0)
+// 			{
+// 				return -1;
+// 			}
+// 			int iRet = 0;
+// 			while(cb_lockcompareexchange(_IOData_Lock_, 1, 0) == 1);
+// 			if(!_pIODataRecvHead_){
+// 
+// 			}
+// 			cb_lockexchange(_IOData_Lock_, 0);
+// 			return iRet;
+// 		}
+// 		cb_lock_ul _IOData_Lock_;
+// 		IO_DATA* _pIODataRecvHead_;
+// 		IO_DATA* _pIODataSendHead_;
+
+
+		SOCKADDR_IN	_SockC_ClientAddr_;
+		cb_socket	_SockC_Socket_;
+	}SOCK_CONTEXT,*PSOCK_CONTEXT;
+
+	typedef struct LISTEN_IO_CONTEXT
+	{
+		OVERLAPPED	_OL_;
+		cb_socket	_Listen_IO_Sock_;
+		WSABUF		_ListenIOBuf_;
+	}LISTEN_IO_CONTEXT,*PLISTEN_IO_CONTEXT;
+
+	typedef struct IO_CONTEXT
+	{
+		OVERLAPPED	_OL_;
+
+		IO_TYPE		_IO_Type_;
+		WSABUF		_IOBuf_;
+	}IO_CONTEXT,*PIO_CONTEXT;
+
+	class iocp_coderorz : public timeoutcallback_i
+	{
+		iocp_coderorz():m_hiocp(0),m_ListenSock(~0),m_lpfnacceptex(0),m_lpfngetacceptexsockaddrs(0),m_lpfndisconnectex(0){}
 		iocp_coderorz(const iocp_coderorz& ref);
 		iocp_coderorz& operator=(const iocp_coderorz& ref);
 	public:
-		void start(void)
+		virtual ~iocp_coderorz()
 		{
-			m_iocppolling.start(3000, 10, accept_timeout);
-
-			WSADATA wsaData; ::WSAStartup(MAKEWORD(2, 2), &wsaData);
-
-			m_hiocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 0);
-			m_slistensock = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
-			CreateIoCompletionPort((HANDLE)m_slistensock, m_hiocp, (DWORD)0, 0);
-
-			DWORD dwBytes(0);
-			GUID disconnectex = WSAID_DISCONNECTEX;
-			WSAIoctl(m_slistensock, SIO_GET_EXTENSION_FUNCTION_POINTER, 
-				&disconnectex, sizeof(disconnectex), &m_lpfndisconnectex, sizeof(m_lpfndisconnectex), 
-				&dwBytes, NULL, NULL);
-			GUID acceptex = WSAID_ACCEPTEX;
-			WSAIoctl(m_slistensock, SIO_GET_EXTENSION_FUNCTION_POINTER, 
-				&acceptex, sizeof(acceptex), &m_lpfnacceptex, sizeof(m_lpfnacceptex), 
-				&dwBytes, NULL, NULL);
-			GUID acceptexsockaddrs = WSAID_GETACCEPTEXSOCKADDRS;
-			WSAIoctl(m_slistensock, SIO_GET_EXTENSION_FUNCTION_POINTER, 
-				&acceptexsockaddrs, sizeof(acceptexsockaddrs), &m_lpfngetacceptexsockaddrs, sizeof(m_lpfngetacceptexsockaddrs), 
-				&dwBytes, NULL, NULL);
-
-			struct sockaddr_in saddr	= {0};
-			saddr.sin_family			= AF_INET;
-			saddr.sin_addr.s_addr		= inet_addr("172.16.40.100");
-			saddr.sin_port				= htons(12345);
-
-			bind(m_slistensock, (struct sockaddr*)&saddr, sizeof(saddr));
-
-			listen(m_slistensock, SOMAXCONN);
-
-			SYSTEM_INFO sysinfo;
-			::GetSystemInfo(&sysinfo);//sysInfo.dwPageSize
-			unsigned long ulcount(sysinfo.dwNumberOfProcessors * 2);
-			while(ulcount--){
-				cb_thread_fd tfd;
-				cb_create_thread(tfd, iocp_proc, this);
-				cb_thread_fail(tfd);
-			}
-
-			while(ulcount++ < 10){
-				plisten_io_context plioc = m_iocp_lioc.newobj();
-				if(plioc)
-					if(postlistenio(plioc) != 0)
-						m_iocp_lioc.delobj(plioc);
-			}
+			cb_closesock(m_ListenSock);
+			CloseHandle(m_hiocp);
+			WSACleanup();
 		}
-		void stop(void)
-		{
-			m_iocppolling.stop();
-		}
-		virtual ~iocp_coderorz(){}
-	public:
-		void delsockc(psock_context psockc)
-		{
-			
-		}
-		void delioc(pio_context pioc)
-		{
-
-		}
-		void doaccept(plisten_io_context plisten_ioc)
-		{
-			SOCKADDR_IN* psaddr(0), *pcaddr(0);	int iaddrlen(sizeof(SOCKADDR_IN) + 16), saddrlen(0), caddrlen(0);
-			m_lpfngetacceptexsockaddrs(plisten_ioc->liobuf.buf, 0, iaddrlen, iaddrlen, 
-				(LPSOCKADDR*)&psaddr, &saddrlen, (LPSOCKADDR*)&pcaddr, &caddrlen);
-			//m_syslog.writelog("connect coming ...\n");
-			psock_context psockc = m_iocp_sockc.newobj();
-			if(psockc){
-				
-			}
-			else{
-				//closesock(pListenIoContext->m_listenSock);
-				//pListenIoContext->m_listenSock = INVALID_SOCKET;
-			}
-
-		}
-		void handleiocp(psock_context psockc, pio_context pioc, unsigned long dwbytes)
-		{
-			switch(pioc->iotype)
-			{
-			case io_type_dofr:
-
-				break;
-			case io_type_recv:
-
-				break;
-			case io_type_null:
-				break;
-			}
-		}
-		cb_thread_fd ioport(void){return m_hiocp;}
-	public:
 		static iocp_coderorz& instance(void){static iocp_coderorz ref;return ref;}
+	public:
 		static unsigned int __stdcall iocp_proc(void* p)
 		{
-			iocp_coderorz* piocp = (iocp_coderorz*)p; cb_thread_fd hiocp = piocp->ioport();
-			psock_context psockc(0); cb_overlapped* piocp_ol(0); unsigned long dwbytes(0);
+			iocp_coderorz* pIocpServer = (iocp_coderorz*)p; cb_thread_fd hIocp = pIocpServer->m_hiocp;
+			PSOCK_CONTEXT pSockC(0); OVERLAPPED* pIocp_OL(0); DWORD dwBytes(0);
 			while(1)
 			{
-				if(GetQueuedCompletionStatus(hiocp, &dwbytes, (unsigned long __w64*)&psockc, &piocp_ol, -1))
+				if(GetQueuedCompletionStatus(hIocp, &dwBytes, (PULONG_PTR)&pSockC, &pIocp_OL, -1))
 				{
-					if(dwbytes > 0){
-						pio_context pioc = cb_io_containing_record(piocp_ol, io_context);
-						piocp->handleiocp(psockc, pioc, dwbytes);
+					if(dwBytes > 0)
+					{
+						pIocpServer->HandleIOCP(pSockC, CONTAINING_RECORD(pIocp_OL, IO_CONTEXT, _OL_), dwBytes);
+						continue;
 					}
-					else if(dwbytes == 0){
-						if(!psockc){
-							plisten_io_context pioc = cb_io_containing_record(piocp_ol, listen_io_context);
-							piocp->doaccept(pioc);
+					if(dwBytes == 0)
+					{
+						if(!pSockC)
+						{
+							pIocpServer->DoAccept(CONTAINING_RECORD(pIocp_OL, LISTEN_IO_CONTEXT, _OL_));
+							continue;
 						}
-						else{
-							if(psockc){
-								piocp->delsockc(psockc);
-							}
-							pio_context pioc = cb_io_containing_record(piocp_ol, io_context);
-							if(pioc){
-								piocp->delioc(pioc);
-							}
+						if(pSockC){
+							pIocpServer->DelSockC(pSockC);
+						}
+						PIO_CONTEXT pIOC = CONTAINING_RECORD(pIocp_OL, IO_CONTEXT, _OL_);
+						if(pIOC){
+							pIocpServer->DelIOC(pIOC);
 						}
 					}
 					continue;
 				}
-				if(psockc){
-					piocp->delsockc(psockc);
+				if(pSockC){
+					pIocpServer->DelSockC(pSockC);
 				}
-				if(piocp_ol)
+				if(pIocp_OL)
 				{
-					pio_context pioc = cb_io_containing_record(piocp_ol, io_context);
-					if(pioc){
-						piocp->delioc(pioc);
+					PIO_CONTEXT pIOC = CONTAINING_RECORD(pIocp_OL, IO_CONTEXT, _OL_);
+					if(pIOC){
+						pIocpServer->DelIOC(pIOC);
 					}
 				}
 			}
 			//exit
 			return 0;
 		}
-		static void* accept_timeout(void* p)
+		virtual int timeout_callback(void* p)
 		{
-			iocp_coderorz::instance();
+			//Node 被锁,不可能被其它的线程从 Node 上 Del 掉
+			PSOCK_CONTEXT pSockC = (PSOCK_CONTEXT)p;
+			if(pSockC->_SockC_Socket_ != INVALID_SOCKET)
+			{
+				LINGER lingerStruct; lingerStruct.l_onoff = 1; lingerStruct.l_linger = 0;
+				setsockopt(pSockC->_SockC_Socket_, SOL_SOCKET, SO_LINGER, (char*)&lingerStruct, sizeof(lingerStruct));
+				if(pSockC->GetIOCount())
+				{
+					CancelIo((HANDLE)pSockC->_SockC_Socket_);
+				}
+				cb_closesock(pSockC->_SockC_Socket_);
+			}
 			return 0;
 		}
-	private:
-		int postlistenio(plisten_io_context plioc)
+		virtual int handle_business(char*)
 		{
-			plioc->liosock = WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED);
-			DWORD dwbytes(sizeof(sockaddr_in) + 16);
-			if(!m_lpfnacceptex(m_slistensock, plioc->liosock, plioc->liobuf.buf, 
-				0, dwbytes, dwbytes, &dwbytes, &plioc->ol) && cb_io_pending != cb_errno)
+			return 0;
+		}
+	public:
+		void start(void)
+		{
+			WSADATA wsaData; ::WSAStartup(MAKEWORD(2, 2), &wsaData);
+
+			m_hiocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 0);
+			m_ListenSock = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
+			CreateIoCompletionPort((HANDLE)m_ListenSock, m_hiocp, (DWORD)0, 0);
+
+			DWORD dwBytes(0);
+			GUID disconnectex = WSAID_DISCONNECTEX;
+			WSAIoctl(m_ListenSock, SIO_GET_EXTENSION_FUNCTION_POINTER, 
+				&disconnectex, sizeof(disconnectex), &m_lpfndisconnectex, sizeof(m_lpfndisconnectex), &dwBytes, NULL, NULL);
+			GUID acceptex = WSAID_ACCEPTEX;
+			WSAIoctl(m_ListenSock, SIO_GET_EXTENSION_FUNCTION_POINTER, 
+				&acceptex, sizeof(acceptex), &m_lpfnacceptex, sizeof(m_lpfnacceptex), &dwBytes, NULL, NULL);
+			GUID acceptexsockaddrs = WSAID_GETACCEPTEXSOCKADDRS;
+			WSAIoctl(m_ListenSock, SIO_GET_EXTENSION_FUNCTION_POINTER, 
+				&acceptexsockaddrs, sizeof(acceptexsockaddrs), &m_lpfngetacceptexsockaddrs, sizeof(m_lpfngetacceptexsockaddrs), &dwBytes, NULL, NULL);
+
+			struct sockaddr_in saddr	= {0};
+			saddr.sin_family			= AF_INET;
+			saddr.sin_addr.s_addr		= inet_addr("127.0.0.1");//inet_addr("172.16.50.30");
+			saddr.sin_port				= htons(12345);
+
+			bind(m_ListenSock, (struct sockaddr*)&saddr, sizeof(saddr));
+
+			listen(m_ListenSock, SOMAXCONN);
+
+			SYSTEM_INFO sysinfo;
+			::GetSystemInfo(&sysinfo);//sysInfo.dwPageSize
+			unsigned long ulcount(sysinfo.dwNumberOfProcessors * 2);
+			for(int i = 0; i < ulcount; ++i)
+			//while(--ulcount >= 0)
 			{
-				cb_closesock(plioc->liosock);
+				cb_thread_fd tfd;
+				cb_thread_create(tfd, iocp_proc, this);
+				cb_thread_fail(tfd);
+			}
+
+			m_TimeOutProcRef.start(this);
+			m_HeartBeatProcRef.start(this, 30000);
+
+			for(int i = 0; i < 10; ++i)
+			//while(ulcount++ < 10)
+			{
+				PostListenIO();
+			}
+		}
+	public:
+		PSOCK_CONTEXT GetSockC(void)
+		{
+			PSOCK_CONTEXT pSockC = m_SockC_Pool.newobj();
+			if(!pSockC)
+			{
+				int isize = sizeof(SOCK_CONTEXT) + __mem_pool_offset__;
+				pSockC = (PSOCK_CONTEXT)new char[isize];
+				if(!pSockC){
+					return 0;
+				}
+				memset(pSockC, 0, isize);
+				pSockC = (PSOCK_CONTEXT)((char*)pSockC + __mem_pool_offset__);
+			}
+			else{
+				memset(pSockC, 0, sizeof(SOCK_CONTEXT));
+			}
+			return pSockC;
+		}
+
+		int DelSockC(PSOCK_CONTEXT pSockC)
+		{
+			int IOCount = pSockC->DelIOCount();
+			if(IOCount == 0)
+			{
+				cb_closesock(pSockC->_SockC_Socket_);
+				m_SockC_Pool.delobj(pSockC);
+			}
+			else{
+				char buf[2048] = {0};
+				sprintf_s(buf, 2048, "DelSockC IOCount Error [%d]\n", IOCount);
+				cb_log.writelog(buf);
+			}
+			return IOCount;
+		}
+
+		PIO_CONTEXT GetIOC(IO_TYPE _IO_Type)
+		{
+			PIO_CONTEXT pIOC = m_IOC_Pool.newobj();
+			if(!pIOC)
+			{
+				int isize = sizeof(IO_CONTEXT) + __mem_pool_offset__;
+				pIOC = (PIO_CONTEXT)new char[isize];
+				if(!pIOC){
+					return 0;
+				}
+				memset(pIOC, 0, isize);
+				pIOC = (PIO_CONTEXT)((char*)pIOC + __mem_pool_offset__);
+			}
+			else{
+				memset(pIOC, 0, sizeof(IO_CONTEXT));
+			}
+			pIOC->_IOBuf_.buf = (char*)m_MemPool.mcb_pool_new(4096);
+			if(!pIOC->_IOBuf_.buf)
+			{
+				int isize = 4096 + __mem_pool_offset__;
+				pIOC->_IOBuf_.buf = new char[isize];
+				if(!pIOC->_IOBuf_.buf)
+				{
+					m_IOC_Pool.delobj(pIOC);
+					return 0;
+				}
+				memset(pIOC->_IOBuf_.buf, 0, isize);
+				pIOC->_IOBuf_.buf += __mem_pool_offset__;
+			}
+			else{
+				memset(pIOC->_IOBuf_.buf, 0, 4096);
+			}
+			pIOC->_IO_Type_ = _IO_Type;
+			pIOC->_IOBuf_.len = 4096;
+			
+			return pIOC;
+		}
+
+		void DelIOC(PIO_CONTEXT pIOC)
+		{
+			if(pIOC)
+			{
+				if(pIOC->_IOBuf_.buf)
+				{
+					m_MemPool.mcb_pool_del(pIOC->_IOBuf_.buf);
+					pIOC->_IOBuf_.buf = 0;
+				}
+				m_IOC_Pool.delobj(pIOC);
+			}
+		}
+
+		char* GetMemory(DWORD dwBytes)
+		{
+			char* pData = (char*)m_MemPool.mcb_pool_new(dwBytes);
+			if(!pData)
+			{
+				int size = dwBytes + __mem_pool_offset__;
+				pData = new char[size];
+				if(!pData)
+					return 0;
+				memset(pData, 0, size);
+				return (pData + __mem_pool_offset__);
+			}
+			memset(pData, 0, dwBytes);
+			return pData;
+		}
+
+		void DelMemory(void* pDel)
+		{
+			if(pDel)
+			{
+				m_MemPool.mcb_pool_del(pDel);
+			}
+		}
+
+		//????
+		int ReuseSocket(SOCKET sock, LPOVERLAPPED pOL = 0)
+		{
+			if(!pOL){
+				cb_closesock(sock);
+				return 0;
+			}
+			struct linger so_linger;
+			so_linger.l_onoff = 1; so_linger.l_linger = 0;
+			int iRet = setsockopt(sock, SOL_SOCKET, SO_DONTLINGER, (const char*)&so_linger, sizeof(so_linger));
+			if(iRet)
+			{
+				if(m_lpfndisconnectex(sock, pOL/*不为空,异步可能返回error_io_pending,属于正常操作*/, TF_REUSE_SOCKET, 0))
+				{
+					// 重用 SOCKET
+					cb_closesock(sock);
+
+					return 0;
+				}
+				else{
+					printf("555555555555555555555555555[%d][%d]\n", iRet, cb_errno);
+					return -1;
+				}
+			}
+			else{
+				printf("666666666666666666666666666[%d][%d]\n", iRet, cb_errno);
+				return -1;
+			}
+		}
+		
+		void DoAccept(PLISTEN_IO_CONTEXT pListenIOC)
+		{
+			SOCKADDR_IN* pServerSockAddr(0); SOCKADDR_IN* pClientSockAddr(0);
+			INT nServerAddrLen(0); INT nClentAddrLen(0);
+			DWORD nSockAddrLen(sizeof(SOCKADDR_IN) + 16);
+			m_lpfngetacceptexsockaddrs(pListenIOC->_ListenIOBuf_.buf, 0, nSockAddrLen, nSockAddrLen, 
+				(LPSOCKADDR*)&pServerSockAddr, &nServerAddrLen, (LPSOCKADDR*)&pClientSockAddr, &nClentAddrLen);
+			
+			//检测IP是否合法,或者过滤特定IP
+			//inet_ntoa(pClientSockAddr->sin_addr);
+			
+			PSOCK_CONTEXT pSockC = GetSockC();
+			if(pSockC)
+			{
+				memcpy(&pSockC->_SockC_ClientAddr_, pClientSockAddr, sizeof(SOCKADDR_IN));
+				pSockC->_SockC_Socket_ = pListenIOC->_Listen_IO_Sock_; pListenIOC->_Listen_IO_Sock_ = INVALID_SOCKET;
+
+				if(CreateIoCompletionPort((HANDLE)pSockC->_SockC_Socket_, m_hiocp, (DWORD)pSockC, 0))
+				{
+					PIO_CONTEXT pIOC = GetIOC(IO_TYPE_DOFR);
+					if(pIOC)
+					{
+						DWORD dwFlags(0), dwBytes(0);
+
+						m_TimeOutProcRef.add(pSockC);
+
+						pSockC->AddIOCount();
+
+						if(SOCKET_ERROR != WSARecv(pSockC->_SockC_Socket_, &pIOC->_IOBuf_, 1, &dwBytes, &dwFlags, &pIOC->_OL_, NULL) 
+							|| (WSA_IO_PENDING == cb_errno))
+						{
+							PostListenIO(pListenIOC);
+							return ;
+						}
+
+						pSockC->DelIOCount();
+
+						int iret = m_TimeOutProcRef.del(pSockC);
+						if(iret != 0)
+						{
+							char buf[2048] = {0};
+							sprintf_s(buf, 2048, "DoAccept [m_TimeOutProcRef.del] [%d]\n", iret);
+							cb_log.writelog(buf);
+						}
+
+						DelIOC(pIOC);
+						char buf[2048] = {0};
+						sprintf_s(buf, 2048, "DoAccept WSARecv(%d)\n", cb_errno);
+						cb_log.writelog(buf);
+					}
+					else
+					{
+						cb_log.writelog("DoAccept GetIOC(0)\n");
+					}
+				}
+				else
+				{
+					char buf[2048] = {0};
+					sprintf_s(buf, 2048, "DoAccept CreateIoCompletionPort(false)[%d]\n", cb_errno);
+					cb_log.writelog(buf);
+				}
+				cb_closesock(pSockC->_SockC_Socket_);
+				m_SockC_Pool.delobj(pSockC);
+			}
+			else
+			{
+				cb_closesock(pListenIOC->_Listen_IO_Sock_);
+				cb_log.writelog("DoAccept GetSOCKC(0)\n");
+			}
+			
+			PostListenIO(pListenIOC);
+			return ;
+		}
+
+		int PostListenIO(PLISTEN_IO_CONTEXT pListenIOC = 0)
+		{
+			if(!pListenIOC)
+			{
+				if(!(pListenIOC = m_ListenIOC_Pool.newobj()))
+				{
+					cb_log.writelog("PostListenIO new pListenIOC(0)\n");
+					return -1;
+				}
+				pListenIOC->_ListenIOBuf_.buf = (char*)m_MemPool.mcb_pool_new(4096);
+				if(!pListenIOC->_ListenIOBuf_.buf)
+				{
+					m_ListenIOC_Pool.delobj(pListenIOC);
+					pListenIOC = 0;
+					cb_log.writelog("PostListenIO new pListenIOC[buf](0)\n");
+					return -2;
+				}
+				pListenIOC->_ListenIOBuf_.len = 4096;
+				memset(pListenIOC->_ListenIOBuf_.buf, 0, pListenIOC->_ListenIOBuf_.len);
+			}
+			pListenIOC->_Listen_IO_Sock_ = WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED);
+			if(pListenIOC->_Listen_IO_Sock_ == INVALID_SOCKET)
+			{
+				if(pListenIOC->_ListenIOBuf_.buf)
+				{
+					m_MemPool.mcb_pool_del(pListenIOC->_ListenIOBuf_.buf);
+					pListenIOC->_ListenIOBuf_.buf = 0;
+				}
+				pListenIOC->_ListenIOBuf_.len = 0;
+				m_ListenIOC_Pool.delobj(pListenIOC);
+				cb_log.writelog("PostListenIO WSASocket(INVALID_SOCKET)\n");
+				return -3;
+			}
+			
+			DWORD dwBytes(sizeof(sockaddr_in) + 16);
+			if(!m_lpfnacceptex(m_ListenSock, pListenIOC->_Listen_IO_Sock_, pListenIOC->_ListenIOBuf_.buf, 0, 
+				dwBytes, dwBytes, &dwBytes, &pListenIOC->_OL_) && WSA_IO_PENDING != cb_errno)
+			{
+				if(pListenIOC->_ListenIOBuf_.buf)
+				{
+					m_MemPool.mcb_pool_del(pListenIOC->_ListenIOBuf_.buf);
+					pListenIOC->_ListenIOBuf_.buf = 0;
+				}
+				pListenIOC->_ListenIOBuf_.len = 0;
+
+				cb_closesock(pListenIOC->_Listen_IO_Sock_);
+				cb_log.writelog("PostListenIO false\n");
+				return -4;
+			}
+			return 0;
+		}
+
+		void HandleIOCP(PSOCK_CONTEXT pSockC, PIO_CONTEXT pIOC, DWORD dwBytes)
+		{
+			switch(pIOC->_IO_Type_)
+			{
+			case IO_TYPE_DOFR:
+				HandleFirstRecv(pSockC, pIOC, dwBytes);
+				break;
+			case IO_TYPE_RECV:
+				HandleRecv(pSockC, pIOC, dwBytes);
+				break;
+			case IO_TYPE_NULL:
+				break;
+			}
+		}
+	private:
+		int HandleFirstRecv(PSOCK_CONTEXT pSockC, PIO_CONTEXT pIOC, DWORD dwBytes)
+		{
+			//同一个SOCKET只投递了一个IO,不可能被多个线程调用
+			char* pData = 0; int iRet = 0;
+			if(dwBytes <= 0 || (iRet = m_TimeOutProcRef.del(pSockC)) != 0 || !(pData = GetMemory(dwBytes)))
+			{
+				DelIOC(pIOC);
+				int DelSockCRet = DelSockC(pSockC);
+				if(DelSockCRet){
+					char buf[2048] = {0};
+					sprintf_s(buf, 2048, "HandleFirstRecv[DelSockC] [%d]\n", DelSockCRet);
+					cb_log.writelog(buf);
+				}
+				char buf[2048] = {0};
+				sprintf_s(buf, 2048, "HandleFirstRecv [%d][%d]\n", iRet, dwBytes);
+				cb_log.writelog(buf);
+				return -1;
+			}
+			else{
+				memcpy(pData, pIOC->_IOBuf_.buf, dwBytes);
+
+				//------------------------>
+				char buf[8192 + 1024] = {0};
+				sprintf_s(buf, 8192 + 1024, "%s %d 发送信息 : %s\n", 
+					inet_ntoa(pSockC->_SockC_ClientAddr_.sin_addr), ntohs(pSockC->_SockC_ClientAddr_.sin_port), pData);
+				//cb_log.writelog(buf);
+
+				DelMemory(pData);
+				//<------------------------
+
+				//m_HeartBeatProcRef.add(pSockC);
+				pIOC->_IO_Type_ = IO_TYPE_RECV;
+				
+				return PostRecv(pSockC, pIOC);
+			}
+		}
+		
+		int HandleRecv(PSOCK_CONTEXT pSockC, PIO_CONTEXT pIOC, DWORD dwBytes)
+		{
+			char* pData = 0; int iRet = 0;
+			if(dwBytes <= 0/* || (iRet = m_HeartBeatProcRef.exchange_hb(pSockC)) != 0*/ || !(pData = GetMemory(dwBytes)))
+			{
+				/*m_HeartBeatProcRef.del(pSockC);*/
+
+				DelIOC(pIOC);
+				int DelSockCRet = DelSockC(pSockC);
+				if(DelSockCRet){
+					char buf[2048] = {0};
+					sprintf_s(buf, 2048, "HandleRecv[DelSockC] [%d]\n", DelSockCRet);
+					cb_log.writelog(buf);
+				}
+				char buf[2048] = {0};
+				sprintf_s(buf, 2048, "HandleRecv [%d][%d]\n", iRet, dwBytes);
+				cb_log.writelog(buf);
+				return -1;
+			}
+			else{
+				memcpy(pData, pIOC->_IOBuf_.buf, dwBytes);
+
+				//------------------------>
+				char buf[8192 + 1024] = {0};
+				sprintf_s(buf, 8192 + 1024, "%s %d 发送信息 : %s\n", 
+					inet_ntoa(pSockC->_SockC_ClientAddr_.sin_addr), ntohs(pSockC->_SockC_ClientAddr_.sin_port), pData);
+				//cb_log.writelog(buf);
+
+				DelMemory(pData);
+				//<------------------------
+
+				return PostRecv(pSockC, pIOC);
+			}
+		}
+
+		int PostRecv(PSOCK_CONTEXT pSockC, PIO_CONTEXT pIOC)
+		{
+			DWORD dwBytes(0), dwFlags(0);
+			if(SOCKET_ERROR == WSARecv(pSockC->_SockC_Socket_, &pIOC->_IOBuf_, 1, &dwBytes, &dwFlags, &pIOC->_OL_, NULL) 
+				&& (WSA_IO_PENDING != cb_errno))
+			{
+				/*m_HeartBeatProcRef.del(pSockC);*/
+
+				DelIOC(pIOC);
+				int DelSockCRet = DelSockC(pSockC);
+				if(DelSockCRet){
+					char buf[2048] = {0};
+					sprintf_s(buf, 2048, "PostRecv[DelSockC] [%d]\n", DelSockCRet);
+					cb_log.writelog(buf);
+				}
+				char buf[2048] = {0};
+				sprintf_s(buf, 2048, "PostRecv [WSARecv] [%d]\n", cb_errno);
+				cb_log.writelog(buf);
 				return -1;
 			}
 			return 0;
 		}
-		int postrecv(psock_context psockc, pio_context pioc)
-		{
-			unsigned long dwbytes(0), dwflags(0);
-			if(-1 == WSARecv(psockc->sock, &pioc->iobuf, 1, &dwbytes, &dwflags, &pioc->ol, 0) 
-				&& (cb_io_pending != cb_errno))
-			{
-				//cb_errno;
-				//int i = delsockc(psockc);
-				//if((i & 2) == 2){
-				//	m_syslog.writelog("delete socket 3 ...\n");
-				//}
-				//m_syslog.writelog("delete io 1...\n");
-				//m_iocpool.delobj(pNewIOC);
-				return -1;
-			}
-			return 0;
-		}
-	private:
+	public:
 		cb_thread_fd				m_hiocp;
-		cb_socket					m_slistensock;
+	private:
+		cb_socket					m_ListenSock;
 		LPFN_ACCEPTEX				m_lpfnacceptex;
 		LPFN_GETACCEPTEXSOCKADDRS	m_lpfngetacceptexsockaddrs;
 		LPFN_DISCONNECTEX			m_lpfndisconnectex;
-		cb_space_memorypool::obj_pool<listen_io_context> m_iocp_lioc;
-		cb_space_memorypool::obj_pool<sock_context> m_iocp_sockc;
-		cb_space_memorypool::mem_pool m_iocpmem;
-		cb_space_polling::cb_timerpollingex m_iocppolling;
+		cb_space_memorypool::obj_pool<LISTEN_IO_CONTEXT> m_ListenIOC_Pool;
+		cb_space_memorypool::obj_pool<SOCK_CONTEXT> m_SockC_Pool;
+		cb_space_memorypool::obj_pool<IO_CONTEXT> m_IOC_Pool;
+		cb_space_memorypool::mem_pool m_MemPool;
+	private:
+		__cb_class__				m_TimeOutProcRef;
+		__cb_class__				m_HeartBeatProcRef;
 	};
 #endif
 	class epoll_coderorz{};
 };
+//https://coolshell.cn/articles/11564.html
+
+//https://www.cnblogs.com/lidabo/p/6042704.html
+
+//https://www.cnblogs.com/eeexu123/p/5275783.html
 
 #endif
