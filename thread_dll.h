@@ -1896,7 +1896,7 @@ namespace cb_space_socket
 		cb_csocket():m_sock(cb_socket_invalid){}
 		virtual ~cb_csocket(){cb_closesock(m_sock);}
 	public:
-		int connectsvr(const std::string& ip, u_short port, int itimeout = 30)
+		int connectserver(const std::string& ip, u_short port, int itimeout = 30)
 		{
 			sockaddr_in saddr;
 			memset(&saddr, 0, sizeof(sockaddr_in));
@@ -2072,7 +2072,7 @@ namespace cb_space_socket
 			}
 			while(itestcount-- > 0)
 			{
-				if(0 == connectsvr(ip, port))
+				if(0 == connectserver(ip, port))
 				{
 					if(psendbuf && isendlen > 0 && iretheadsize > 0)
 					{
@@ -4102,6 +4102,16 @@ boob_log  cb_log;
 namespace cb_space_server
 {
 #ifdef WIN32
+	class businessdispenseI
+	{
+	public:
+		virtual int handledatahead(char* pheadbuf, int headsize)
+		{
+
+			return 0;
+		}
+	};
+
 	struct node;
 
 	struct elem
@@ -4116,7 +4126,6 @@ namespace cb_space_server
 	{
 	public:
 		virtual int timeout_callback(void*) = 0;
-		virtual int handle_business(char*) = 0;
 	};
 
 	struct node
@@ -4360,11 +4369,13 @@ namespace cb_space_server
 		IO_TYPE_NULL,
 		IO_TYPE_DOFR,
 		IO_TYPE_RECV,
+		IO_TYPE_POST,
 	}IO_TYPE;
 
 	typedef struct DATA_HEAD
 	{
 		int _DataLength_;
+		char N[28];
 	}DATA_HEAD, *PDATA_HEAD;
 
 	typedef struct IO_DATA
@@ -4372,8 +4383,6 @@ namespace cb_space_server
 		char* _pIOData_;
 		int _IODataLen_;
 		int _IODataIndex_;
-
-		struct IO_DATA* _pIODataNext_;
 	}IO_DATA, *PIO_DATA;
 
 	typedef struct SOCK_CONTEXT : elem
@@ -4410,7 +4419,31 @@ namespace cb_space_server
 		cb_lock_ul _IOC_Count_;
 		cb_lock_ul _IOC_Lock_;
 
-
+		int AddRecvBuf(char* pRecvBuf, int nRecvSize, bool bNew = false, int nRecvDataLen = 0, char** pDelBuf = 0)
+		{
+			if(bNew)
+			{
+				if(nRecvDataLen <= 0 || !pDelBuf || nRecvSize > nRecvDataLen)
+				{
+					return -1;
+				}
+				*pDelBuf = _IORecvData_._pIOData_;
+				_IORecvData_._pIOData_		= pRecvBuf;
+				_IORecvData_._IODataLen_	= nRecvDataLen;
+				_IORecvData_._IODataIndex_	= nRecvSize;
+			}
+			else{
+				if(nRecvSize + _IORecvData_._IODataIndex_ > nRecvDataLen)
+				{
+					return -2;
+				}
+				memcpy(&_IORecvData_._pIOData_[_IORecvData_._IODataIndex_], pRecvBuf, nRecvSize);
+				_IORecvData_._IODataIndex_ += nRecvSize;
+			}
+			return 0;
+		}
+		IO_DATA _IORecvData_;
+		IO_DATA _IOSendData_;
 // 		int AddRecvBuf(char* pRecvBuf, int nBufLen)
 // 		{
 // 			if(!pRecvBuf || nBufLen <= 0){
@@ -4442,7 +4475,7 @@ namespace cb_space_server
 
 
 		SOCKADDR_IN	_SockC_ClientAddr_;
-		cb_socket	_SockC_Socket_;
+		SOCKET		_SockC_Socket_;
 	}SOCK_CONTEXT,*PSOCK_CONTEXT;
 
 	typedef struct LISTEN_IO_CONTEXT
@@ -4532,10 +4565,6 @@ namespace cb_space_server
 				}
 				cb_closesock(pSockC->_SockC_Socket_);
 			}
-			return 0;
-		}
-		virtual int handle_business(char*)
-		{
 			return 0;
 		}
 	public:
@@ -4876,6 +4905,9 @@ namespace cb_space_server
 			case IO_TYPE_RECV:
 				HandleRecv(pSockC, pIOC, dwBytes);
 				break;
+			case IO_TYPE_POST:
+
+				break;
 			case IO_TYPE_NULL:
 				break;
 			}
@@ -4884,30 +4916,46 @@ namespace cb_space_server
 		int HandleFirstRecv(PSOCK_CONTEXT pSockC, PIO_CONTEXT pIOC, DWORD dwBytes)
 		{
 			//同一个SOCKET只投递了一个IO,不可能被多个线程调用
-			char* pData = 0; int iRet = 0;
-			if(dwBytes <= 0 || (iRet = m_TimeOutProcRef.del(pSockC)) != 0 || !(pData = GetMemory(dwBytes)))
+			int iRet = 0; char* pData = 0;
+			PDATA_HEAD pDataHead = (PDATA_HEAD)pIOC->_IOBuf_.buf;
+			if(dwBytes <= 0 || dwBytes < sizeof(DATA_HEAD) || !pDataHead || pDataHead->_DataLength_ <= 0 || 
+				(iRet = m_TimeOutProcRef.del(pSockC)) != 0 || !(pData = GetMemory(pDataHead->_DataLength_ + 1)))
 			{
 				DelIOC(pIOC);
 				int DelSockCRet = DelSockC(pSockC);
 				if(DelSockCRet)
 				{
-					char buf[2048] = {0};
-					sprintf_s(buf, 2048, "HandleFirstRecv[DelSockC] [%d]\n", DelSockCRet);
+					char buf[1024] = {0};
+					sprintf_s(buf, 1023, "HandleFirstRecv Error [DelSockC] [%d]\n", DelSockCRet);
 					cb_log.writelog(buf);
 				}
-				char buf[2048] = {0};
-				sprintf_s(buf, 2048, "HandleFirstRecv [%d][%d]\n", iRet, dwBytes);
+				char buf[1024] = {0};
+				sprintf_s(buf, 1023, "HandleFirstRecv Error [%d][%d][%d]\n", iRet, dwBytes, pDataHead ? pDataHead->_DataLength_ : 0);
 				cb_log.writelog(buf);
 				return -1;
 			}
 			else{
-				memcpy(pData, pIOC->_IOBuf_.buf, dwBytes);
+				if(dwBytes < pDataHead->_DataLength_)
+				{
 
+				}
+				else if(dwBytes == pDataHead->_DataLength_){
+
+				}
+				else{
+
+				}
+				memcpy(pData, pIOC->_IOBuf_.buf, dwBytes);
+				if(pData)
+				{
+					DelMemory(pData);
+				}
 				//------------------------>
 				char buf[8192 + 1024] = {0};
-				sprintf_s(buf, 8192 + 1024, "%s %d 发送信息 : %s\n", 
-					inet_ntoa(pSockC->_SockC_ClientAddr_.sin_addr), ntohs(pSockC->_SockC_ClientAddr_.sin_port), pData);
-				//cb_log.writelog(buf);
+				sprintf_s(buf, 8192 + 1024, "%s %d 发送信息 : %s [%d]\n", 
+					inet_ntoa(pSockC->_SockC_ClientAddr_.sin_addr), ntohs(pSockC->_SockC_ClientAddr_.sin_port), pData, dwBytes);
+				cb_log.writelog(buf);
+				printf(buf);
 
 				DelMemory(pData);
 				//<------------------------
@@ -4921,8 +4969,12 @@ namespace cb_space_server
 		int HandleRecv(PSOCK_CONTEXT pSockC, PIO_CONTEXT pIOC, DWORD dwBytes)
 		{
 			char* pData = 0; int iRet = 0;
-			if(dwBytes <= 0 || (iRet = m_HeartBeatProcRef.exchange_hb(pSockC)) != 0 || !(pData = GetMemory(dwBytes)))
+			if(dwBytes <= 0 || (iRet = m_HeartBeatProcRef.exchange_hb(pSockC)) != 0 || !(pData = GetMemory(dwBytes + 1)))
 			{
+				if(pData)
+				{
+					DelMemory(pData);
+				}
 				m_HeartBeatProcRef.del(pSockC);
 
 				DelIOC(pIOC);
@@ -4930,11 +4982,11 @@ namespace cb_space_server
 				if(DelSockCRet)
 				{
 					char buf[2048] = {0};
-					sprintf_s(buf, 2048, "HandleRecv[DelSockC] [%d]\n", DelSockCRet);
+					sprintf_s(buf, 2048, "HandleRecv Error [DelSockC] [%d]\n", DelSockCRet);
 					cb_log.writelog(buf);
 				}
 				char buf[2048] = {0};
-				sprintf_s(buf, 2048, "HandleRecv [%d][%d]\n", iRet, dwBytes);
+				sprintf_s(buf, 2048, "HandleRecv Error [%d][%d]\n", iRet, dwBytes);
 				cb_log.writelog(buf);
 				return -1;
 			}
@@ -4943,9 +4995,10 @@ namespace cb_space_server
 
 				//------------------------>
 				char buf[8192 + 1024] = {0};
-				sprintf_s(buf, 8192 + 1024, "%s %d 发送信息 : %s\n", 
-					inet_ntoa(pSockC->_SockC_ClientAddr_.sin_addr), ntohs(pSockC->_SockC_ClientAddr_.sin_port), pData);
-				//cb_log.writelog(buf);
+				sprintf_s(buf, 8192 + 1024, "%s %d 发送信息 : %s [%d]\n", 
+					inet_ntoa(pSockC->_SockC_ClientAddr_.sin_addr), ntohs(pSockC->_SockC_ClientAddr_.sin_port), pData, dwBytes);
+				cb_log.writelog(buf);
+				printf(buf);
 
 				DelMemory(pData);
 				//<------------------------
@@ -4967,11 +5020,11 @@ namespace cb_space_server
 				if(DelSockCRet)
 				{
 					char buf[2048] = {0};
-					sprintf_s(buf, 2048, "PostRecv[DelSockC] [%d]\n", DelSockCRet);
+					sprintf_s(buf, 2048, "PostRecv Error [DelSockC] [%d]\n", DelSockCRet);
 					cb_log.writelog(buf);
 				}
 				char buf[2048] = {0};
-				sprintf_s(buf, 2048, "PostRecv [WSARecv] [%d]\n", cb_errno);
+				sprintf_s(buf, 2048, "PostRecv Error [WSARecv] [%d]\n", cb_errno);
 				cb_log.writelog(buf);
 				return -1;
 			}
@@ -4980,8 +5033,8 @@ namespace cb_space_server
 
 		int PostSend(PSOCK_CONTEXT pSockC, PIO_CONTEXT pIOC)
 		{
-			DWORD dwBytes(0), dwFlags(0);
-			if(SOCKET_ERROR == WSASend(pSockC->_SockC_Socket_, &pIOC->_IOBuf_, 1, &dwBytes, dwFlags, &pIOC->_OL_, NULL) 
+			DWORD dwBytes(0);
+			if(SOCKET_ERROR == WSASend(pSockC->_SockC_Socket_, &pIOC->_IOBuf_, 1, &dwBytes, 0, &pIOC->_OL_, NULL) 
 				&& (WSA_IO_PENDING != cb_errno))
 			{
 				m_HeartBeatProcRef.del(pSockC);
