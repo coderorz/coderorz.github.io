@@ -15,6 +15,17 @@
 	
 #endif
 
+#if defined(_MSC_VER) && (_MSC_VER < 1600)
+
+typedef unsigned char uint8_t;
+typedef unsigned int uint32_t;
+typedef unsigned __int64 uint64_t;
+#else	// defined(_MSC_VER)
+
+#include <stdint.h>
+
+#endif // !defined(_MSC_VER)
+
 //////////////////////////////////include///////////////////////////////////////
 
 //////////////////////////////////public////////////////////////////////////////
@@ -503,6 +514,7 @@ lab_end:
 		}
 	};
 };
+
 namespace cb_space_memorypool
 {
 	class mem_pool
@@ -3368,12 +3380,12 @@ namespace cb_space_endecryption
 	};
 #pragma endregion
 	/*
-	printf("%s\n", cb_space_algorithm::cb_md5("").tostr().c_str());
-	printf("%s\n", cb_space_algorithm::cb_md5("a").tostr().c_str());
-	printf("%s\n", cb_space_algorithm::cb_md5("abc").tostr().c_str());
-	printf("%s\n", cb_space_algorithm::cb_md5("message digest").tostr().c_str());
-	printf("%s\n", cb_space_algorithm::cb_md5("abcdefghijklmnopqrstuvwxyz").tostr().c_str());
-	printf("%s\n", cb_space_algorithm::cb_md5("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz").tostr().c_str());
+	printf("%s\n", cb_space_endecryption::cb_md5("").tostr().c_str());
+	printf("%s\n", cb_space_endecryption::cb_md5("a").tostr().c_str());
+	printf("%s\n", cb_space_endecryption::cb_md5("abc").tostr().c_str());
+	printf("%s\n", cb_space_endecryption::cb_md5("message digest").tostr().c_str());
+	printf("%s\n", cb_space_endecryption::cb_md5("abcdefghijklmnopqrstuvwxyz").tostr().c_str());
+	printf("%s\n", cb_space_endecryption::cb_md5("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz").tostr().c_str());
 	*/
 	class cb_md5
 	{
@@ -3398,6 +3410,27 @@ namespace cb_space_endecryption
 				str[i * 2 + 1] = cb_md5_hex_numbers[digest_[i] % 16];
 			}
 			return std::string(str);
+		}
+		std::string tostr16()
+		{
+			const unsigned char* digest_ = getdigest();
+			char str[64] = {0};
+			for(size_t i = 0; i < 16; ++i)
+			{
+				str[i * 2 + 0] = cb_md5_hex_numbers[digest_[i] / 16];
+				str[i * 2 + 1] = cb_md5_hex_numbers[digest_[i] % 16];
+			}
+			return std::string(str, 8, 16);
+		}
+		void tostr16(char* pout)
+		{
+			const unsigned char* digest_ = getdigest();
+			int j = 0;
+			for(size_t i = 4; i < 12; ++i)
+			{
+				pout[j++] = cb_md5_hex_numbers[digest_[i] / 16];
+				pout[j++] = cb_md5_hex_numbers[digest_[i] % 16];
+			}
 		}
 	private:
 		const unsigned char* getdigest(void)
@@ -3882,6 +3915,331 @@ namespace cb_space_algorithm
 		}
 	};
 
+	/*
+	void test_MurmurHash3_x86_32() {
+		const char * key = "hogefugafoobar";
+		uint32_t seed = 12345678;
+		uint32_t result;
+
+		printf("Testing test_MurmurHash3_x86_32 ... ");
+
+		cb_space_algorithm::MurmurHash3_x86_32(key, strlen(key), seed, &result);
+
+		assert(result == 2869543723);
+
+		printf("Done\n");
+	}
+
+	void test_MurmurHash3_x86_128() {
+		const char * key = "hogefugafoobar";
+		uint32_t seed = 12345678;
+		uint32_t result[4];
+
+		printf("Testing test_MurmurHash3_x86_128 ... ");
+
+		cb_space_algorithm::MurmurHash3_x86_128(key, strlen(key), seed, &result);
+
+		assert(result[0] == 1512736128);
+		assert(result[1] == 3528938480);
+		assert(result[2] == 3633978259);
+		assert(result[3] == 481906499);
+
+		printf("Done\n");
+	}
+	test_MurmurHash3_x86_32();
+	test_MurmurHash3_x86_128();
+	*/
+	//一致性hash生成函数
+#ifndef _MURMURHASH3_
+#define _MURMURHASH3_
+
+#ifdef __cplusplus
+	extern "C" {
+#endif
+
+#if defined(_MSC_VER)
+	#define FORCE_INLINE __forceinline
+	#include <stdlib.h>
+	#define ROTL32(x,y)	_rotl(x,y)
+	#define ROTL64(x,y)	_rotl64(x,y)
+	#define BIG_CONSTANT(x) (x)
+#else
+	#define	FORCE_INLINE inline __attribute__((always_inline))
+	inline uint32_t rotl32(uint32_t x, int8_t r)
+	{
+		return (x << r) | (x >> (32 - r));
+	}
+	inline uint64_t rotl64(uint64_t x, int8_t r)
+	{
+		return (x << r) | (x >> (64 - r));
+	}
+	#define	ROTL32(x,y)	rotl32(x,y)
+	#define ROTL64(x,y)	rotl64(x,y)
+	#define BIG_CONSTANT(x) (x##LLU)
+#endif
+
+#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__)
+# if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#   define BYTESWAP32(x) (x)
+#   define BYTESWAP64(x) (x)
+# endif
+
+#elif defined(__i386)  || defined(__x86_64) \
+	||  defined(__alpha) || defined(__vax)
+
+# define BYTESWAP32(x) (x)
+# define BYTESWAP64(x) (x)
+
+#elif defined(__GNUC__) || defined(__clang__)
+# ifdef __has_builtin
+#    if __has_builtin(__builtin_bswap32)
+#       define BYTESWAP32(x) __builtin_bswap32(x)
+#    endif
+#    if __has_builtin(__builtin_bswap64)
+#       define BYTESWAP64(x) __builtin_bswap64(x)
+#    endif
+# endif
+#endif
+
+#ifndef BYTESWAP32
+# define BYTESWAP32(x)   ((((x)&0xFF)<<24) \
+	|(((x)>>24)&0xFF) \
+	|(((x)&0x0000FF00)<<8)    \
+	|(((x)&0x00FF0000)>>8)    )
+#endif
+#ifndef BYTESWAP64
+# define BYTESWAP64(x)                               \
+	(((uint64_t)(x) << 56) |                           \
+	(((uint64_t)(x) << 40) & 0X00FF000000000000ULL) | \
+	(((uint64_t)(x) << 24) & 0X0000FF0000000000ULL) | \
+	(((uint64_t)(x) << 8)  & 0X000000FF00000000ULL) | \
+	(((uint64_t)(x) >> 8)  & 0X00000000FF000000ULL) | \
+	(((uint64_t)(x) >> 24) & 0X0000000000FF0000ULL) | \
+	(((uint64_t)(x) >> 40) & 0X000000000000FF00ULL) | \
+	((uint64_t)(x)  >> 56))
+#endif
+
+	FORCE_INLINE uint32_t getblock32(const uint32_t * p, int i){return BYTESWAP32(p[i]);}
+
+	FORCE_INLINE uint64_t getblock64(const uint64_t * p, int i){return BYTESWAP64(p[i]);}
+
+	FORCE_INLINE uint32_t fmix32(uint32_t h){ h ^= h >> 16; h *= 0x85ebca6b; h ^= h >> 13; h *= 0xc2b2ae35; h ^= h >> 16; return h; }
+
+	FORCE_INLINE uint64_t fmix64(uint64_t k){ k ^= k >> 33; k *= BIG_CONSTANT(0xff51afd7ed558ccd); k ^= k >> 33; k *= BIG_CONSTANT(0xc4ceb9fe1a85ec53); k ^= k >> 33; return k; }
+
+	void MurmurHash3_x86_32 (const void* key, int len, uint32_t seed, void* out)
+	{
+		const uint8_t* data = (const uint8_t*)key;
+		const int nblocks = len / 4;
+		uint32_t h1 = seed;
+		const uint32_t c1 = 0xcc9e2d51;
+		const uint32_t c2 = 0x1b873593;
+		// body
+		const uint32_t * blocks = (const uint32_t*)(data + nblocks * 4);
+		for(int i = -nblocks; i; i++)
+		{
+			uint32_t k1 = getblock32(blocks, i);
+
+			k1 *= c1;
+			k1 = ROTL32(k1,15);
+			k1 *= c2;
+
+			h1 ^= k1;
+			h1 = ROTL32(h1,13); 
+			h1 = h1 * 5 + 0xe6546b64;
+		}
+		// tail
+		const uint8_t* tail = (const uint8_t*)(data + nblocks * 4);
+		uint32_t k1 = 0;
+		switch(len & 3)
+		{
+		case 3: k1 ^= tail[2] << 16;
+		case 2: k1 ^= tail[1] << 8;
+		case 1: k1 ^= tail[0];
+			k1 *= c1; k1 = ROTL32(k1, 15); k1 *= c2; h1 ^= k1;
+		};
+		// finalization
+		h1 ^= len;
+		h1 = fmix32(h1);
+		*(uint32_t*)out = h1;
+	}
+
+	void MurmurHash3_x86_128(const void* key, int len, uint32_t seed, void* out)
+	{
+		const uint8_t * data = (const uint8_t*)key;
+		const int nblocks = len / 16;
+		uint32_t h1 = seed;
+		uint32_t h2 = seed;
+		uint32_t h3 = seed;
+		uint32_t h4 = seed;
+		const uint32_t c1 = 0x239b961b; 
+		const uint32_t c2 = 0xab0e9789;
+		const uint32_t c3 = 0x38b34ae5; 
+		const uint32_t c4 = 0xa1e38b93;
+		// body
+		const uint32_t* blocks = (const uint32_t *)(data + nblocks * 16);
+		for(int i = -nblocks; i; i++)
+		{
+			uint32_t k1 = getblock32(blocks,i * 4 + 0);
+			uint32_t k2 = getblock32(blocks,i * 4 + 1);
+			uint32_t k3 = getblock32(blocks,i * 4 + 2);
+			uint32_t k4 = getblock32(blocks,i * 4 + 3);
+
+			k1 *= c1; k1  = ROTL32(k1,15); k1 *= c2; h1 ^= k1;
+
+			h1 = ROTL32(h1,19); h1 += h2; h1 = h1*5+0x561ccd1b;
+
+			k2 *= c2; k2  = ROTL32(k2,16); k2 *= c3; h2 ^= k2;
+
+			h2 = ROTL32(h2,17); h2 += h3; h2 = h2*5+0x0bcaa747;
+
+			k3 *= c3; k3  = ROTL32(k3,17); k3 *= c4; h3 ^= k3;
+
+			h3 = ROTL32(h3,15); h3 += h4; h3 = h3*5+0x96cd1c35;
+
+			k4 *= c4; k4  = ROTL32(k4,18); k4 *= c1; h4 ^= k4;
+
+			h4 = ROTL32(h4,13); h4 += h1; h4 = h4*5+0x32ac3b17;
+		}
+		// tail
+		const uint8_t * tail = (const uint8_t*)(data + nblocks*16);
+		uint32_t k1 = 0;
+		uint32_t k2 = 0;
+		uint32_t k3 = 0;
+		uint32_t k4 = 0;
+		switch(len & 15)
+		{
+		case 15: k4 ^= tail[14] << 16;
+		case 14: k4 ^= tail[13] << 8;
+		case 13: k4 ^= tail[12] << 0;
+			k4 *= c4; k4  = ROTL32(k4,18); k4 *= c1; h4 ^= k4;
+
+		case 12: k3 ^= tail[11] << 24;
+		case 11: k3 ^= tail[10] << 16;
+		case 10: k3 ^= tail[ 9] << 8;
+		case  9: k3 ^= tail[ 8] << 0;
+			k3 *= c3; k3  = ROTL32(k3,17); k3 *= c4; h3 ^= k3;
+
+		case  8: k2 ^= tail[ 7] << 24;
+		case  7: k2 ^= tail[ 6] << 16;
+		case  6: k2 ^= tail[ 5] << 8;
+		case  5: k2 ^= tail[ 4] << 0;
+			k2 *= c2; k2  = ROTL32(k2,16); k2 *= c3; h2 ^= k2;
+
+		case  4: k1 ^= tail[ 3] << 24;
+		case  3: k1 ^= tail[ 2] << 16;
+		case  2: k1 ^= tail[ 1] << 8;
+		case  1: k1 ^= tail[ 0] << 0;
+			k1 *= c1; k1  = ROTL32(k1,15); k1 *= c2; h1 ^= k1;
+		};
+		// finalization
+		h1 ^= len; h2 ^= len; h3 ^= len; h4 ^= len;
+
+		h1 += h2; h1 += h3; h1 += h4;
+		h2 += h1; h3 += h1; h4 += h1;
+
+		h1 = fmix32(h1);
+		h2 = fmix32(h2);
+		h3 = fmix32(h3);
+		h4 = fmix32(h4);
+
+		h1 += h2; h1 += h3; h1 += h4;
+		h2 += h1; h3 += h1; h4 += h1;
+
+		((uint32_t*)out)[0] = h1;
+		((uint32_t*)out)[1] = h2;
+		((uint32_t*)out)[2] = h3;
+		((uint32_t*)out)[3] = h4;
+	}
+
+	void MurmurHash3_x64_128(const void* key, int len, uint32_t seed, void* out)
+	{
+		const uint8_t* data = (const uint8_t*)key;
+		const int nblocks = len / 16;
+
+		uint64_t h1 = seed;
+		uint64_t h2 = seed;
+
+		const uint64_t c1 = BIG_CONSTANT(0x87c37b91114253d5);
+		const uint64_t c2 = BIG_CONSTANT(0x4cf5ad432745937f);
+		// body
+		const uint64_t* blocks = (const uint64_t *)(data);
+		for(int i = 0; i < nblocks; i++)
+		{
+			uint64_t k1 = getblock64(blocks, i * 2 + 0);
+			uint64_t k2 = getblock64(blocks, i * 2 + 1);
+
+			k1 *= c1; k1  = ROTL64(k1,31); k1 *= c2; h1 ^= k1;
+
+			h1 = ROTL64(h1,27); h1 += h2; h1 = h1*5+0x52dce729;
+
+			k2 *= c2; k2  = ROTL64(k2,33); k2 *= c1; h2 ^= k2;
+
+			h2 = ROTL64(h2,31); h2 += h1; h2 = h2*5+0x38495ab5;
+		}
+		// tail
+		const uint8_t* tail = (const uint8_t*)(data + nblocks * 16);
+		uint64_t k1 = 0;
+		uint64_t k2 = 0;
+		switch(len & 15)
+		{
+		case 15: k2 ^= ((uint64_t)tail[14]) << 48;
+		case 14: k2 ^= ((uint64_t)tail[13]) << 40;
+		case 13: k2 ^= ((uint64_t)tail[12]) << 32;
+		case 12: k2 ^= ((uint64_t)tail[11]) << 24;
+		case 11: k2 ^= ((uint64_t)tail[10]) << 16;
+		case 10: k2 ^= ((uint64_t)tail[ 9]) << 8;
+		case  9: k2 ^= ((uint64_t)tail[ 8]) << 0;
+			k2 *= c2; k2  = ROTL64(k2,33); k2 *= c1; h2 ^= k2;
+
+		case  8: k1 ^= ((uint64_t)tail[ 7]) << 56;
+		case  7: k1 ^= ((uint64_t)tail[ 6]) << 48;
+		case  6: k1 ^= ((uint64_t)tail[ 5]) << 40;
+		case  5: k1 ^= ((uint64_t)tail[ 4]) << 32;
+		case  4: k1 ^= ((uint64_t)tail[ 3]) << 24;
+		case  3: k1 ^= ((uint64_t)tail[ 2]) << 16;
+		case  2: k1 ^= ((uint64_t)tail[ 1]) << 8;
+		case  1: k1 ^= ((uint64_t)tail[ 0]) << 0;
+			k1 *= c1; k1  = ROTL64(k1,31); k1 *= c2; h1 ^= k1;
+		};
+		// finalization
+		h1 ^= len; h2 ^= len;
+
+		h1 += h2;
+		h2 += h1;
+
+		h1 = fmix64(h1);
+		h2 = fmix64(h2);
+
+		h1 += h2;
+		h2 += h1;
+
+		((uint64_t*)out)[0] = h1;
+		((uint64_t*)out)[1] = h2;
+	}
+#ifdef __cplusplus
+	}
+#endif
+
+#endif // _MURMURHASH3_H_
+
+#ifndef _KETAMA_HASH_
+#define _KETAMA_HASH_
+#ifdef __cplusplus
+	extern "C" {
+#endif
+	uint32_t KetamaHashKey(const std::string& key)
+	{
+		unsigned char results[16] = {0};
+		cb_space_endecryption::cb_md5(key).tostr16((char*)results);
+		return ((uint32_t)(results[3] & 0xFF) << 24) | ((uint32_t)(results[2] & 0xFF) << 16) 
+			| ((uint32_t)(results[1] & 0xFF) << 8) | ((uint32_t)(results[0] & 0xFF));
+	}
+#ifdef __cplusplus
+	}
+#endif
+#endif // _KETAMA_HASH_
+
 	//AVL-Tree
 };
 
@@ -4053,8 +4411,10 @@ public:
 	{
 	}
 
-	~boob_log(){
-		if(strlist.size()){
+	~boob_log()
+	{
+		if(strlist.size())
+		{
 			FILE * fp(NULL);
 			int flag = fopen_s(&fp, "D:\\MyLog\\log.txt","a");
 			for(std::vector<std::string>::iterator iter = strlist.begin(); iter != strlist.end(); ++iter){
@@ -4068,11 +4428,13 @@ public:
 		}
 		strlist.clear();
 	}
-	void writelog(std::string str){
+	void writelog(std::string str)
+	{
 		//return ;
 		while(InterlockedCompareExchange(&lock, 1, 0) == 1);
 		{
-			if(strlist.size() >= 10){
+			if(strlist.size() >= 10)
+			{
 				FILE * fp(NULL);
 				strlist.push_back(str);
 				int flag = fopen_s(&fp, "D:\\MyLog\\log.txt","a");
@@ -4374,7 +4736,7 @@ namespace cb_space_server
 
 	typedef struct DATA_HEAD
 	{
-		int _DataLength_;
+		DWORD _DataLength_;
 		char N[28];
 	}DATA_HEAD, *PDATA_HEAD;
 
@@ -4492,7 +4854,9 @@ namespace cb_space_server
 		IO_TYPE		_IO_Type_;
 		WSABUF		_IOBuf_;
 	}IO_CONTEXT,*PIO_CONTEXT;
-
+	
+	//https://blog.csdn.net/liujiayu2/article/details/51853416
+	
 	class iocp_coderorz : public timeoutcallback_i
 	{
 		iocp_coderorz():m_hiocp(0),m_ListenSock(~0),m_lpfnacceptex(0),m_lpfngetacceptexsockaddrs(0),m_lpfndisconnectex(0){}
@@ -4715,7 +5079,7 @@ namespace cb_space_server
 			}
 		}
 
-		char* GetMemory(DWORD dwBytes)
+		char* NewMemory(DWORD dwBytes)
 		{
 			char* pData = (char*)m_MemPool.mcb_pool_new(dwBytes);
 			if(!pData)
@@ -4919,7 +5283,7 @@ namespace cb_space_server
 			int iRet = 0; char* pData = 0;
 			PDATA_HEAD pDataHead = (PDATA_HEAD)pIOC->_IOBuf_.buf;
 			if(dwBytes <= 0 || dwBytes < sizeof(DATA_HEAD) || !pDataHead || pDataHead->_DataLength_ <= 0 || 
-				(iRet = m_TimeOutProcRef.del(pSockC)) != 0 || !(pData = GetMemory(pDataHead->_DataLength_ + 1)))
+				(iRet = m_TimeOutProcRef.del(pSockC)) != 0 || !(pData = NewMemory(pDataHead->_DataLength_ + 1)))
 			{
 				DelIOC(pIOC);
 				int DelSockCRet = DelSockC(pSockC);
@@ -4969,7 +5333,7 @@ namespace cb_space_server
 		int HandleRecv(PSOCK_CONTEXT pSockC, PIO_CONTEXT pIOC, DWORD dwBytes)
 		{
 			char* pData = 0; int iRet = 0;
-			if(dwBytes <= 0 || (iRet = m_HeartBeatProcRef.exchange_hb(pSockC)) != 0 || !(pData = GetMemory(dwBytes + 1)))
+			if(dwBytes <= 0 || (iRet = m_HeartBeatProcRef.exchange_hb(pSockC)) != 0 || !(pData = NewMemory(dwBytes + 1)))
 			{
 				if(pData)
 				{
@@ -5044,11 +5408,11 @@ namespace cb_space_server
 				if(DelSockCRet)
 				{
 					char buf[2048] = {0};
-					sprintf_s(buf, 2048, "PostSend[DelSockC] [%d]\n", DelSockCRet);
+					sprintf_s(buf, 2048, "PostSend Error [DelSockC] [%d]\n", DelSockCRet);
 					cb_log.writelog(buf);
 				}
 				char buf[2048] = {0};
-				sprintf_s(buf, 2048, "PostSend [WSASend] [%d]\n", cb_errno);
+				sprintf_s(buf, 2048, "PostSend Error [WSASend] [%d]\n", cb_errno);
 				cb_log.writelog(buf);
 				return -1;
 			}
