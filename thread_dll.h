@@ -16,14 +16,11 @@
 #endif
 
 #if defined(_MSC_VER) && (_MSC_VER < 1600)
-
-typedef unsigned char uint8_t;
-typedef unsigned int uint32_t;
-typedef unsigned __int64 uint64_t;
+	typedef unsigned char uint8_t;
+	typedef unsigned int uint32_t;
+	typedef unsigned __int64 uint64_t;
 #else	// defined(_MSC_VER)
-
-#include <stdint.h>
-
+	#include <stdint.h>
 #endif // !defined(_MSC_VER)
 
 //////////////////////////////////include///////////////////////////////////////
@@ -1280,8 +1277,9 @@ while(i++ < 200){
 getchar();
 t.stop();
 */
-template<typename t> class cb_timerpoling
+template<typename t> class cb_timerpolling
 {
+	//单线程定时轮询超时触发器,超时节点会删除
 	struct pollnode
 	{
 		cb_lock_ul m_nlock;
@@ -1291,28 +1289,28 @@ template<typename t> class cb_timerpoling
 	};
 	struct cb_params{
 		pvoid_proc_pvoid proc;
-		cb_timerpoling* pthis;
+		cb_timerpolling* pthis;
 	};
-	cb_timerpoling(const cb_timerpoling& ref);
-	cb_timerpoling& operator=(const cb_timerpoling& ref);
+	cb_timerpolling(const cb_timerpolling& ref);
+	cb_timerpolling& operator=(const cb_timerpolling& ref);
 public:
-	cb_timerpoling():m_phead(0),m_pdel(0){}
-	virtual ~cb_timerpoling()
+	cb_timerpolling():m_phead(0),m_pdel(0){}
+	virtual ~cb_timerpolling()
 	{
 		stop();
 	}
 public:
-	int start(int idelaytime, int ipolingcount, pvoid_proc_pvoid proc)
+	int start(int idelaytime, int ipollingcount, pvoid_proc_pvoid proc)
 	{
-		if(idelaytime <= 0 || ipolingcount <= 0 || !proc){
+		if(idelaytime <= 0 || ipollingcount <= 0 || !proc){
 			return -1;
 		}
-		if(!createloop(ipolingcount)){
+		if(!createloop(ipollingcount)){
 			return -2;
 		}
 		m_params.proc	 = proc;
 		m_params.pthis   = this;
-		m_timer.start(idelaytime/ipolingcount, invoke, &m_params);
+		m_timer.start(idelaytime/ipollingcount, invoke, &m_params);
 		return 0;
 	}
 	int add(t* pthead, t** pptailnext)
@@ -1363,17 +1361,17 @@ private:
 		p->pthis->invoke(p->proc);
 		return 0;
 	}
-	pollnode* createloop(int ipolingcount)
+	pollnode* createloop(int ipollingcount)
 	{
-		if(ipolingcount <= 0)
+		if(ipollingcount <= 0)
 			return 0;
-		ipolingcount += 1;//
-		m_pdel = new(std::nothrow) pollnode[ipolingcount];
+		ipollingcount += 1;//
+		m_pdel = new(std::nothrow) pollnode[ipollingcount];
 		if(!m_pdel)
 			return 0;
-		memset(m_pdel, 0, sizeof(pollnode) * ipolingcount);
+		memset(m_pdel, 0, sizeof(pollnode) * ipollingcount);
 		pollnode* ptail = 0;
-		for(int i = 0; i < ipolingcount - 1; ++i)
+		for(int i = 0; i < ipollingcount - 1; ++i)
 		{
 			m_phead = &m_pdel[i]; ptail = &m_pdel[i + 1];
 			m_phead->m_pnext = ptail;
@@ -1415,7 +1413,7 @@ struct cb_paramsex
 	cb_timerpolling2* pthis;
 };
 #ifndef WIN32
-void* __cb_poling_proc__(void* pparams);
+void* __cb_polling_proc__(void* pparams);
 #endif
 /*
 struct cb2 : public cb_space_polling::telem{
@@ -1453,32 +1451,33 @@ t.stop();
 */
 class cb_timerpolling2
 {
+	//多线程定时轮询触发器(不会删除节点,结束定时任务后清除)(节点需要继承telem)
 #ifndef WIN32
-	friend void* __cb_poling_proc__(void* pparams);
+	friend void* __cb_polling_proc__(void* pparams);
 #endif
 public:
 	cb_timerpolling2()
 		:m_handlehead(0),m_handlelock(0),m_nhandleprocexitflag(0),m_nhandleproccount(0),m_phead(0),m_pdel(0){}
 	virtual ~cb_timerpolling2(){stop();}
 public:
-	int start(int idelaytime, int ipolingcount, pvoid_proc_pvoid proc, int iproccount = 1)
+	int start(int idelaytime, int ipollingcount, pvoid_proc_pvoid proc, int iproccount = 1)
 	{
-		if(idelaytime <= 0 || ipolingcount <= 0 || !proc){
+		if(idelaytime <= 0 || ipollingcount <= 0 || !proc){
 			return -1;
 		}
-		if(!createloop(ipolingcount)){
+		if(!createloop(ipollingcount)){
 			return -2;
 		}
-		m_timer.start(idelaytime/ipolingcount, invokeex, this);
+		m_timer.start(idelaytime/ipollingcount, invokeex, this);
 		m_paramsex.proc = proc;
 		m_paramsex.pthis = this;
 		while(iproccount-- > 0)
 		{
 			cb_thread_fd tfd;
 #ifdef WIN32
-			cb_thread_create(tfd, __cb_poling_proc__, &m_paramsex);
+			cb_thread_create(tfd, __cb_polling_proc__, &m_paramsex);
 #else
-			cb_thread_create(tfd, __cb_poling_proc__, &m_paramsex);
+			cb_thread_create(tfd, __cb_polling_proc__, &m_paramsex);
 #endif
 			if(cb_thread_fail(tfd)){
 				return -3;
@@ -1641,19 +1640,19 @@ private:
 		return 0;
 	}
 #ifdef WIN32
-	static unsigned int __stdcall __cb_poling_proc__(void* pparams);
+	static unsigned int __stdcall __cb_polling_proc__(void* pparams);
 #endif
-	pollnodeex* createloop(int ipolingcount)
+	pollnodeex* createloop(int ipollingcount)
 	{
-		if(ipolingcount <= 0)
+		if(ipollingcount <= 0)
 			return 0;
-		ipolingcount += 1;//
-		m_pdel = new(std::nothrow) pollnodeex[ipolingcount];
+		ipollingcount += 1;//
+		m_pdel = new(std::nothrow) pollnodeex[ipollingcount];
 		if(!m_pdel)
 			return 0;
-		memset(m_pdel, 0, sizeof(pollnodeex) * ipolingcount);
+		memset(m_pdel, 0, sizeof(pollnodeex) * ipollingcount);
 		pollnodeex* ptail = 0;
-		for(int i = 0; i < ipolingcount - 1; ++i)
+		for(int i = 0; i < ipollingcount - 1; ++i)
 		{
 			m_phead = &m_pdel[i]; ptail = &m_pdel[i + 1];
 			m_phead->m_pnext = ptail;
@@ -1676,9 +1675,9 @@ private:
 	cb_space_timer::cb_timer m_timer;
 };
 #ifndef WIN32
-void* __cb_poling_proc__(void* pparams)
+void* __cb_polling_proc__(void* pparams)
 #else
-unsigned int __stdcall cb_timerpolling2::__cb_poling_proc__(void* pparams)
+unsigned int __stdcall cb_timerpolling2::__cb_polling_proc__(void* pparams)
 #endif
 {
 	cb_paramsex* p = (cb_paramsex*)pparams;
@@ -1715,7 +1714,7 @@ unsigned int __stdcall cb_timerpolling2::__cb_poling_proc__(void* pparams)
 }
 
 /*
-struct cb : public cb_space_poling::serverbase{
+struct cb : public cb_space_polling::cb_base{
 	int x;
 };
 cb_space_memorypool::obj_pool<cb> cb_pool;
@@ -1764,6 +1763,7 @@ struct pollingnodeex
 };
 class cb_timerpollingex
 {
+	//多线程定时轮询超时触发器,超时节点会删除(节点需要继承cb_base)
 public:
 	cb_timerpollingex():m_proc(0),m_pnodehead(0),m_pdel(0){}
 	virtual ~cb_timerpollingex(){stop();}
@@ -1775,16 +1775,16 @@ public:
 		return 0;
 	}
 public:
-	int start(int idelaytime, int ipolingcount, pvoid_proc_pvoid _proc)
+	int start(int idelaytime, int ipollingcount, pvoid_proc_pvoid _proc)
 	{
-		if(idelaytime <= 0 || ipolingcount <= 0 || !_proc){
+		if(idelaytime <= 0 || ipollingcount <= 0 || !_proc){
 			return -1;
 		}
-		if(!createloop(ipolingcount)){
+		if(!createloop(ipollingcount)){
 			return -2;
 		}
 		m_proc = _proc;
-		return m_timer.start(idelaytime/ipolingcount, invoke, this);
+		return m_timer.start(idelaytime/ipollingcount, invoke, this);
 	}
 	int add(cb_base* padd)
 	{
@@ -1871,17 +1871,17 @@ private:
 		}
 		return 0;
 	}
-	pollingnodeex* createloop(int ipolingcount)
+	pollingnodeex* createloop(int ipollingcount)
 	{
-		if(ipolingcount <= 0)
+		if(ipollingcount <= 0)
 			return 0;
-		ipolingcount += 1;//
-		m_pdel = new(std::nothrow) pollingnodeex[ipolingcount];
+		ipollingcount += 1;//
+		m_pdel = new(std::nothrow) pollingnodeex[ipollingcount];
 		if(!m_pdel)
 			return 0;
-		memset(m_pdel, 0, sizeof(pollingnodeex) * ipolingcount);
+		memset(m_pdel, 0, sizeof(pollingnodeex) * ipollingcount);
 		pollingnodeex* ptail = 0;
-		for(int i = 0; i < ipolingcount - 1; ++i)
+		for(int i = 0; i < ipollingcount - 1; ++i)
 		{
 			m_pnodehead = &m_pdel[i]; ptail = &m_pdel[i + 1];
 			m_pnodehead->m_pnext = ptail;
@@ -2132,7 +2132,7 @@ namespace cb_space_socket
 	};
 };
 
-namespace cb_space_endecryption
+namespace cb_space_encryption_decryption//encryption_decryption
 {
 #pragma region	aes
 	const unsigned char aes_sbox[16][16] = 
@@ -2305,6 +2305,7 @@ namespace cb_space_endecryption
 		{0x17,0x2B,0x04,0x7E,0xBA,0x77,0xD6,0x26,0xE1,0x69,0x14,0x63,0x55,0x21,0x0C,0x7D}
 	};
 #pragma endregion
+	//cb_aes(128/192/256)
 	class cb_aes
 	{
 	public:
@@ -3400,7 +3401,7 @@ namespace cb_space_endecryption
 			init((unsigned char*)strtext.c_str(), strtext.length());
 		}
 		virtual ~cb_md5(){}
-		std::string tostr()
+		std::string tostr()//32
 		{
 			const unsigned char* digest_ = getdigest();
 			char str[64] = {0};
@@ -3411,7 +3412,7 @@ namespace cb_space_endecryption
 			}
 			return std::string(str);
 		}
-		std::string tostr16()
+		std::string tostr16()//16
 		{
 			const unsigned char* digest_ = getdigest();
 			char str[64] = {0};
@@ -3422,7 +3423,7 @@ namespace cb_space_endecryption
 			}
 			return std::string(str, 8, 16);
 		}
-		void tostr16(char* pout)
+		void tostr16(char* pout)//16
 		{
 			const unsigned char* digest_ = getdigest();
 			int j = 0;
@@ -3806,11 +3807,13 @@ namespace cb_space_algorithm
 	class cb_sort
 	{
 	public:
+		//快速
 		template<typename T>static void quick_sort(T* pdata, int isize)
 		{
 			quicksort(pdata, 0, isize - 1);
 		}
 		/* void* ==> int (*)(T&, T&); */
+		//堆
 		template<typename T>static void heap_sort(T* pdata, int isize, void* cmp = 0)
 		{
 			int i = isize / 2 - 1;
@@ -3823,9 +3826,26 @@ namespace cb_space_algorithm
 				adjust_heap(pdata, 0, i - 1, cmp);
 			}
 		}
+		//归并
 		template<typename T>static void merge_sort(T* pdata, int isize)
 		{
 			mergesort(pdata, 0, isize - 1);
+		}
+		//二分查找(实现 T1 == & < & > T2 的重载)
+		template<typename T1, typename T2>static int binary_seacher(T1* pdata, int isize, const T2& key)
+		{
+			int index1(0), index2(isize - 1), mid(0);
+			while(index1 <= index2)
+			{
+				mid = (index1 + index2) / 2;
+				if(pdata[mid] == key)
+					return mid;
+				if(pdata[mid] > key)
+					index2 = mid - 1;
+				if(pdata[mid] < key)
+					index1 = mid + 1;
+			}
+			return -1;
 		}
 	private:
 		template<typename T>static void quicksort(T* pdata, int ileft, int iright)
@@ -3915,6 +3935,404 @@ namespace cb_space_algorithm
 		}
 	};
 
+	//B-Tree
+	/*定义:
+		一棵M（M>2）阶B-tree应该满足以下定义：
+		每个结点的孩子结点个数不超过M个；
+		非根结点的孩子结点个数不少于ceiling(M/2)个；
+		N个结点关键字对应N+1个孩子结点；
+		假设结点有关键件key1、key2、...、keyN，则有孩子结点指针child1、child2、...、childN、child(N+1)，且有MaxKeyValue(child1)<key1<MinKeyValue(child2)<...<KeyN<MinKeyValue(Key(N+1))；
+		结点中存有关键字和数据。
+		
+		eg:
+		char keyVals[] = {'a','b','f','g','k','d','h','m','j','e','s','i','r','x','c','l','n','t','u','p'};
+		cb_space_algorithm::cb_btree<char> btree;
+		for(int i = 0; i < sizeof(keyVals)/sizeof(keyVals[0]); ++i)
+		{
+			btree.insert(keyVals[i]);
+			if(keyVals[i] == 'm')
+			{
+				btree.remove(keyVals[i]);
+			}
+		}
+		btree.display();
+	*/
+	template<class T>
+	class cb_btree
+	{
+	private:
+		static const int btree_m	= 2;					//B树的最小度数
+		static const int key_max	= 2 * btree_m - 1;		//节点包含关键字的最大个数
+		static const int key_min	= btree_m - 1;			//非根节点包含关键字的最小个数
+		static const int child_max	= key_max + 1;			//孩子节点的最大个数
+		static const int child_min	= key_min + 1;			//孩子节点的最小个数
+		struct node
+		{
+			bool	bleaf;									//是否是叶子节点
+			int		keynum;									//节点包含的关键字数量
+			T		keyvalue[key_max];						//关键字的值数组
+			node*	pchild[child_max];						//子树指针数组
+			node(bool b = true, int n = 0):bleaf(b), keynum(n){}
+		};
+	public:
+		cb_btree():m_proot(0){}
+		virtual ~cb_btree(){clear();}
+	public:
+		bool insert(const T& key)    //向B数中插入新结点key
+		{
+			//检查该关键字是否已经存在
+			if(contain(key))
+			{
+				return false;
+			}
+
+			if(!m_proot)//检查是否为空树
+			{
+				m_proot = new node();
+			}
+			if(m_proot->keynum == key_max) //检查根节点是否已满
+			{
+				node *pnode = new node();
+				pnode->bleaf = false;
+				pnode->pchild[0] = m_proot;
+				splitchild(pnode, 0, m_proot);
+				m_proot = pnode;
+			}
+			insertnonfull(m_proot, key);
+			return true;
+		}
+		bool remove(const T& key)
+		{
+			if(!search(m_proot, key))//不存在
+			{
+				return false;
+			}
+			if(m_proot->keynum == 1)//特殊情况处理
+			{
+				if(m_proot->bleaf){
+					clear();
+					return true;
+				}
+				else
+				{
+					node *pchild1 = m_proot->pchild[0];
+					node *pchild2 = m_proot->pchild[1];
+					if(pchild1->keynum == key_min && pchild2->keynum == key_min)
+					{
+						mergechild(m_proot, 0);
+						deletenode(m_proot);
+						m_proot = pchild1;
+					}
+				}
+			}
+			recursive_remove(m_proot, key);
+			return true;
+		}
+		//打印树的关键字
+		void display() const
+		{
+			displayinconcavo(m_proot, key_max * 10);
+		}
+		//检查该key是否存在于B树中
+		bool contain(const T& key) const
+		{
+			return search(m_proot, key);
+		}
+		//清空B树
+		void clear()
+		{
+			recursive_clear(m_proot);
+			m_proot = 0;
+		}
+	private:
+		//删除树
+		void recursive_clear(node* pnode)
+		{
+			if(pnode)
+			{
+				if(!pnode->bleaf)
+				{
+					for(int i = 0; i <= pnode->keynum; ++i){
+						recursive_clear(pnode->pchild[i]);
+					}
+				}
+				deletenode(pnode);
+			}
+		}
+		//删除节点
+		void deletenode(node*& pnode)
+		{
+			if(pnode)
+				delete pnode, pnode = 0;
+		}
+		//查找关键字
+		bool search(node* pnode, const T& key)const 
+		{
+			if(!pnode)//检测节点指针是否为空，或该节点是否为叶子节点
+				return false;
+
+			//找到使key <= pNode->keyvalue[i]成立的最小下标i
+			int i(0);
+			for(; i < pnode->keynum && key > *(pnode->keyvalue + i); ++i);
+			
+			if(i < pnode->keynum && key == pnode->keyvalue[i])
+				return true;
+			
+			if(pnode->bleaf)//检查该节点是否为叶子节点
+			{
+				return false;
+			}
+			else{
+				return search(pnode->pchild[i], key);
+			}
+		}
+		//分裂子节点
+		void splitchild(node* pparent, int nchildindex, node* pchild)  
+		{
+			//将pchild分裂成pLeftNode和pchild两个节点
+			node* prightnode = new node();//分裂后的右节点
+			prightnode->bleaf = pchild->bleaf;
+			prightnode->keynum = key_min;
+
+			int i(0);
+			for(; i < key_min; ++i)//拷贝关键字的值
+				prightnode->keyvalue[i] = pchild->keyvalue[i + child_min];
+			
+			if(!pchild->bleaf)  //如果不是叶子节点，拷贝孩子节点指针
+			{
+				for(i = 0; i < child_min; ++i)
+				{
+					prightnode->pchild[i] = pchild->pchild[i + child_min];
+				}
+			}
+
+			pchild->keynum = key_min;  //更新左子树的关键字个数
+
+			//将父节点中的nchildindex后的所有关键字的值和子树指针向后移一位
+			for(i = pparent->keynum; i > nchildindex; --i){
+				pparent->pchild[i + 1]	= pparent->pchild[i];
+				pparent->keyvalue[i]	= pparent->keyvalue[i - 1];
+			}
+
+			++pparent->keynum;  //更新父节点的关键字个数
+			pparent->pchild[nchildindex + 1] = prightnode;  //存储右子树指针
+			pparent->keyvalue[nchildindex]	 = pchild->keyvalue[key_min];//把节点的中间值提到父节点
+		}
+		//在非满节点中插入关键字
+		void insertnonfull(node* pnode, const T& key)
+		{
+			//获取节点内关键字个数
+			int i(pnode->keynum);
+			//pnode是叶子节点
+			if(pnode->bleaf)
+			{
+				//从后往前，查找关键字的插入位置
+				while(i > 0 && key < pnode->keyvalue[i-1])
+				{
+					pnode->keyvalue[i] = pnode->keyvalue[i-1];	//向后移位
+					--i;
+				}
+				pnode->keyvalue[i] = key;						//插入关键字的值
+				++pnode->keynum;								//更新节点关键字的个数
+			}
+			else//pnode是内节点
+			{
+				//从后往前，查找关键字的插入的子树
+				while(i > 0 && key < pnode->keyvalue[i - 1])
+				{
+					--i;
+				}
+				node *pchild = pnode->pchild[i];				//目标子树结点指针 
+				if(pchild->keynum == key_max)					//子树节点已满
+				{
+					splitchild(pnode, i, pchild);				//分裂子树节点
+					if(key > pnode->keyvalue[i]){				//确定目标子树
+						pchild = pnode->pchild[i+1];
+					}
+				}
+				insertnonfull(pchild, key);						//插入关键字到目标子树节点
+			}
+		}
+		//用括号打印树
+		void displayinconcavo(node* pnode, int count) const
+		{
+			if(pnode)
+			{
+				int i(0), j(count);
+				for(; i < pnode->keynum; ++i)
+				{
+					if(!pnode->bleaf)
+					{
+						displayinconcavo(pnode->pchild[i], count - 2);
+					}
+					for(; j >= 0; --j)
+						printf("-");
+					printf("%c\n", pnode->keyvalue[i]);
+				}
+				if(!pnode->bleaf)
+				{
+					displayinconcavo(pnode->pchild[i], count - 2);
+				}
+			}
+		}
+		//合并两个子节点
+		void mergechild(node* pparent, int index)
+		{
+			node *pchild1 = pparent->pchild[index];
+			node *pchild2 = pparent->pchild[index + 1];
+			//将pchild2数据合并到pchild1
+			pchild1->keynum = key_max;
+			//将父节点index的值下移
+			pchild1->keyvalue[key_min] = pparent->keyvalue[index];
+			int i(0);
+			for(; i < key_min; ++i)
+			{
+				pchild1->keyvalue[i + key_min + 1] = pchild2->keyvalue[i];
+			}
+			if(!pchild1->bleaf)
+			{
+				for(i = 0; i < child_min; ++i)
+				{
+					pchild1->pchild[i + child_min] = pchild2->pchild[i];
+				}
+			}
+
+			//父节点删除index的key，index后的往前移一位
+			--pparent->keynum;
+			for(i = index; i < pparent->keynum; ++i)
+			{
+				pparent->keyvalue[i] = pparent->keyvalue[i + 1];
+				pparent->pchild[i + 1] = pparent->pchild[i + 2];
+			}
+			deletenode(pchild2);//删除pChild2
+		}
+		//递归的删除关键字
+		void recursive_remove(node* pnode, const T& key)
+		{
+			int i(0);
+			while(i < pnode->keynum && key > pnode->keyvalue[i]) ++i;
+			//关键字key在节点pnode中
+			if(i < pnode->keynum && key == pnode->keyvalue[i])
+			{
+				if(pnode->bleaf)//pnode是个叶节点
+				{
+					//从pnode中删除k
+					--pnode->keynum;
+					for(; i < pnode->keynum; ++i)
+					{
+						pnode->keyvalue[i] = pnode->keyvalue[i + 1];
+					}
+					return ;
+				}
+				else//pnode是个内节点
+				{
+					node* pchildprev = pnode->pchild[i];		//节点pnode中前于key的子节点
+					node* pchildnext = pnode->pchild[i + 1];	//节点pnode中后于key的子节点
+					if(pchildprev->keynum >= child_min)			//节点pchildprev中至少包含child_min个关键字
+					{
+						T prevkey = getpredecessor(pchildprev);	//获取key的前驱关键字
+						recursive_remove(pchildprev, prevkey);
+						pnode->keyvalue[i] = prevkey;			//替换成key的前驱关键字
+						return;
+					}
+					else if(pchildnext->keynum>=child_min)		//节点pchildnext中至少包含child_min个关键字
+					{
+						T nextkey = getsuccessor(pchildnext);	//获取key的后继关键字
+						recursive_remove(pchildnext, nextkey);
+						pnode->keyvalue[i] = nextkey;			//替换成key的后继关键字
+						return;
+					}
+					else//节点pchildprev和pchildnext中都只包含child_min-1个关键字
+					{
+						mergechild(pnode, i);
+						recursive_remove(pchildprev, key);
+					}
+				}
+			}
+			else//关键字key不在节点pnode中
+			{
+				node* pchildnode = pnode->pchild[i];			//包含key的子树根节点
+				if(pchildnode->keynum == key_min)				//只有t-1个关键字
+				{
+					node* pleft	 = (i > 0 ? pnode->pchild[i - 1] : 0);			//左兄弟节点
+					node* pright = (i < pnode->keynum ? pnode->pchild[i+1] : 0);//右兄弟节点
+					
+					if(pleft&&pleft->keynum>=child_min)//左兄弟节点至少有child_min个关键字
+					{
+						//父节点中i-1的关键字下移至pchildnode中
+						int j(pchildnode->keynum);
+						for(; j > 0; --j){
+							pchildnode->keyvalue[j] = pchildnode->keyvalue[j - 1];
+						}
+						pchildnode->keyvalue[0] = pnode->keyvalue[i - 1];
+
+						if(!pleft->bleaf)
+						{
+							for(j = pchildnode->keynum + 1; j > 0; --j)			//pleft节点中合适的子女指针移植到pchildnode中
+							{
+								pchildnode->pchild[j] = pchildnode->pchild[j-1];
+							}
+							pchildnode->pchild[0] = pleft->pchild[pleft->keynum];
+						}
+						++pchildnode->keynum;
+						pnode->keyvalue[i] = pleft->keyvalue[pleft->keynum - 1];//pleft节点中的最大关键字上升到pnode中
+						--pleft->keynum;
+					}
+					else if(pright && pright->keynum >= child_min)				//右兄弟节点至少有child_min个关键字
+					{
+						//父节点中i的关键字下移至pchildnode中
+						pchildnode->keyvalue[pchildnode->keynum] = pnode->keyvalue[i];
+						++pchildnode->keynum;
+						pnode->keyvalue[i] = pright->keyvalue[0];				//pright节点中的最小关键字上升到pnode中
+						--pright->keynum;
+						int j(0);
+						for(; j < pright->keynum; ++j){
+							pright->keyvalue[j] = pright->keyvalue[j + 1];
+						}
+						if(!pright->bleaf)
+						{
+							pchildnode->pchild[pchildnode->keynum] = pright->pchild[0];//pright节点中合适的子女指针移植到pchildnode中
+							for(j = 0; j <= pright->keynum; ++j){
+								pright->pchild[j] = pright->pchild[j + 1];
+							}
+						}
+					}
+					//左右兄弟节点都只包含child_min-1个节点
+					else if(pleft)//与左兄弟合并
+					{
+						mergechild(pnode, i - 1);
+						pchildnode = pleft;
+					}
+					else if(pright)//与右兄弟合并
+					{
+						mergechild(pnode, i);
+					}
+				}
+				recursive_remove(pchildnode, key);
+			}
+		}
+		//找到前驱关键字
+		T getpredecessor(node* pnode)
+		{
+			while(!pnode->bleaf)
+			{
+				pnode = pnode->pchild[pnode->keynum];
+			}
+			return pnode->keyvalue[pnode->keynum - 1];
+		}
+		//找到后继关键字
+		T getsuccessor(node* pnode)
+		{
+			while(!pnode->bleaf)
+			{
+				pnode = pnode->pchild[0];
+			}
+			return pnode->keyvalue[0];
+		}
+	private:
+		node * m_proot;  //B树的根节点
+	};
+
 	/*
 	void test_MurmurHash3_x86_32() {
 		const char * key = "hogefugafoobar";
@@ -3950,27 +4368,23 @@ namespace cb_space_algorithm
 	test_MurmurHash3_x86_128();
 	*/
 	//一致性hash生成函数
-#ifndef _MURMURHASH3_
-#define _MURMURHASH3_
-
+#ifndef _consistencyhash_
+#define _consistencyhash_
+//MURMURHASH3 & KETAMA_HASH
 #ifdef __cplusplus
 	extern "C" {
 #endif
-
 #if defined(_MSC_VER)
 	#define FORCE_INLINE __forceinline
-	#include <stdlib.h>
 	#define ROTL32(x,y)	_rotl(x,y)
 	#define ROTL64(x,y)	_rotl64(x,y)
 	#define BIG_CONSTANT(x) (x)
 #else
 	#define	FORCE_INLINE inline __attribute__((always_inline))
-	inline uint32_t rotl32(uint32_t x, int8_t r)
-	{
+	inline uint32_t rotl32(uint32_t x, int8_t r){
 		return (x << r) | (x >> (32 - r));
 	}
-	inline uint64_t rotl64(uint64_t x, int8_t r)
-	{
+	inline uint64_t rotl64(uint64_t x, int8_t r){
 		return (x << r) | (x >> (64 - r));
 	}
 	#define	ROTL32(x,y)	rotl32(x,y)
@@ -3979,55 +4393,38 @@ namespace cb_space_algorithm
 #endif
 
 #if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__)
-# if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-#   define BYTESWAP32(x) (x)
-#   define BYTESWAP64(x) (x)
-# endif
-
-#elif defined(__i386)  || defined(__x86_64) \
-	||  defined(__alpha) || defined(__vax)
-
-# define BYTESWAP32(x) (x)
-# define BYTESWAP64(x) (x)
-
+	#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+		#define BYTESWAP32(x) (x)
+		#define BYTESWAP64(x) (x)
+	#endif
+#elif defined(__i386)  || defined(__x86_64) ||  defined(__alpha) || defined(__vax)
+	#define BYTESWAP32(x) (x)
+	#define BYTESWAP64(x) (x)
 #elif defined(__GNUC__) || defined(__clang__)
-# ifdef __has_builtin
-#    if __has_builtin(__builtin_bswap32)
-#       define BYTESWAP32(x) __builtin_bswap32(x)
-#    endif
-#    if __has_builtin(__builtin_bswap64)
-#       define BYTESWAP64(x) __builtin_bswap64(x)
-#    endif
-# endif
+	#ifdef __has_builtin
+		#if __has_builtin(__builtin_bswap32)
+			#define BYTESWAP32(x) __builtin_bswap32(x)
+		#endif
+		#if __has_builtin(__builtin_bswap64)
+			#define BYTESWAP64(x) __builtin_bswap64(x)
+		#endif
+	#endif
 #endif
 
 #ifndef BYTESWAP32
-# define BYTESWAP32(x)   ((((x)&0xFF)<<24) \
-	|(((x)>>24)&0xFF) \
-	|(((x)&0x0000FF00)<<8)    \
-	|(((x)&0x00FF0000)>>8)    )
+	#define BYTESWAP32(x) ((((x)&0xFF)<<24)	|(((x)>>24)&0xFF) |(((x)&0x0000FF00)<<8) |(((x)&0x00FF0000)>>8))
 #endif
 #ifndef BYTESWAP64
-# define BYTESWAP64(x)                               \
-	(((uint64_t)(x) << 56) |                           \
-	(((uint64_t)(x) << 40) & 0X00FF000000000000ULL) | \
-	(((uint64_t)(x) << 24) & 0X0000FF0000000000ULL) | \
-	(((uint64_t)(x) << 8)  & 0X000000FF00000000ULL) | \
-	(((uint64_t)(x) >> 8)  & 0X00000000FF000000ULL) | \
-	(((uint64_t)(x) >> 24) & 0X0000000000FF0000ULL) | \
-	(((uint64_t)(x) >> 40) & 0X000000000000FF00ULL) | \
-	((uint64_t)(x)  >> 56))
+	#define BYTESWAP64(x) (((uint64_t)(x) << 56) | (((uint64_t)(x) << 40) & 0X00FF000000000000ULL) | \
+		(((uint64_t)(x) << 24) & 0X0000FF0000000000ULL) | (((uint64_t)(x) << 8)  & 0X000000FF00000000ULL) | (((uint64_t)(x) >> 8)  & 0X00000000FF000000ULL) | \
+		(((uint64_t)(x) >> 24) & 0X0000000000FF0000ULL) | (((uint64_t)(x) >> 40) & 0X000000000000FF00ULL) | ((uint64_t)(x)  >> 56))
 #endif
-
-	FORCE_INLINE uint32_t getblock32(const uint32_t * p, int i){return BYTESWAP32(p[i]);}
-
-	FORCE_INLINE uint64_t getblock64(const uint64_t * p, int i){return BYTESWAP64(p[i]);}
 
 	FORCE_INLINE uint32_t fmix32(uint32_t h){ h ^= h >> 16; h *= 0x85ebca6b; h ^= h >> 13; h *= 0xc2b2ae35; h ^= h >> 16; return h; }
 
 	FORCE_INLINE uint64_t fmix64(uint64_t k){ k ^= k >> 33; k *= BIG_CONSTANT(0xff51afd7ed558ccd); k ^= k >> 33; k *= BIG_CONSTANT(0xc4ceb9fe1a85ec53); k ^= k >> 33; return k; }
-
-	void MurmurHash3_x86_32 (const void* key, int len, uint32_t seed, void* out)
+	/*x86:32位 x64:64位*/
+	void murmurhash3_x86_32 (const void* key, int len, uint32_t seed, void* out)
 	{
 		const uint8_t* data = (const uint8_t*)key;
 		const int nblocks = len / 4;
@@ -4038,7 +4435,7 @@ namespace cb_space_algorithm
 		const uint32_t * blocks = (const uint32_t*)(data + nblocks * 4);
 		for(int i = -nblocks; i; i++)
 		{
-			uint32_t k1 = getblock32(blocks, i);
+			uint32_t k1 = BYTESWAP32(blocks[i]);
 
 			k1 *= c1;
 			k1 = ROTL32(k1,15);
@@ -4064,7 +4461,7 @@ namespace cb_space_algorithm
 		*(uint32_t*)out = h1;
 	}
 
-	void MurmurHash3_x86_128(const void* key, int len, uint32_t seed, void* out)
+	void murmurhash3_x86_128(const void* key, int len, uint32_t seed, void* out)
 	{
 		const uint8_t * data = (const uint8_t*)key;
 		const int nblocks = len / 16;
@@ -4080,10 +4477,10 @@ namespace cb_space_algorithm
 		const uint32_t* blocks = (const uint32_t *)(data + nblocks * 16);
 		for(int i = -nblocks; i; i++)
 		{
-			uint32_t k1 = getblock32(blocks,i * 4 + 0);
-			uint32_t k2 = getblock32(blocks,i * 4 + 1);
-			uint32_t k3 = getblock32(blocks,i * 4 + 2);
-			uint32_t k4 = getblock32(blocks,i * 4 + 3);
+			uint32_t k1 = BYTESWAP32(blocks[i * 4 + 0]);
+			uint32_t k2 = BYTESWAP32(blocks[i * 4 + 1]);
+			uint32_t k3 = BYTESWAP32(blocks[i * 4 + 2]);
+			uint32_t k4 = BYTESWAP32(blocks[i * 4 + 3]);
 
 			k1 *= c1; k1  = ROTL32(k1,15); k1 *= c2; h1 ^= k1;
 
@@ -4152,7 +4549,7 @@ namespace cb_space_algorithm
 		((uint32_t*)out)[3] = h4;
 	}
 
-	void MurmurHash3_x64_128(const void* key, int len, uint32_t seed, void* out)
+	void murmurhash3_x64_128(const void* key, int len, uint32_t seed, void* out)
 	{
 		const uint8_t* data = (const uint8_t*)key;
 		const int nblocks = len / 16;
@@ -4166,8 +4563,8 @@ namespace cb_space_algorithm
 		const uint64_t* blocks = (const uint64_t *)(data);
 		for(int i = 0; i < nblocks; i++)
 		{
-			uint64_t k1 = getblock64(blocks, i * 2 + 0);
-			uint64_t k2 = getblock64(blocks, i * 2 + 1);
+			uint64_t k1 = BYTESWAP64(blocks[i * 2 + 0]);
+			uint64_t k2 = BYTESWAP64(blocks[i * 2 + 1]);
 
 			k1 *= c1; k1  = ROTL64(k1,31); k1 *= c2; h1 ^= k1;
 
@@ -4217,28 +4614,18 @@ namespace cb_space_algorithm
 		((uint64_t*)out)[0] = h1;
 		((uint64_t*)out)[1] = h2;
 	}
-#ifdef __cplusplus
-	}
-#endif
 
-#endif // _MURMURHASH3_H_
-
-#ifndef _KETAMA_HASH_
-#define _KETAMA_HASH_
-#ifdef __cplusplus
-	extern "C" {
-#endif
-	uint32_t KetamaHashKey(const std::string& key)
+	uint32_t ketamahash(const std::string& key)
 	{
-		unsigned char results[16] = {0};
-		cb_space_endecryption::cb_md5(key).tostr16((char*)results);
+		unsigned char results[16] = {0}; cb_space_encryption_decryption::cb_md5(key).tostr16((char*)results);
 		return ((uint32_t)(results[3] & 0xFF) << 24) | ((uint32_t)(results[2] & 0xFF) << 16) 
 			| ((uint32_t)(results[1] & 0xFF) << 8) | ((uint32_t)(results[0] & 0xFF));
 	}
 #ifdef __cplusplus
 	}
 #endif
-#endif // _KETAMA_HASH_
+#endif//_consistencyhash_
+
 
 	//AVL-Tree
 };
@@ -5079,7 +5466,7 @@ namespace cb_space_server
 			}
 		}
 
-		char* NewMemory(DWORD dwBytes)
+		char* GetMemory(DWORD dwBytes)
 		{
 			char* pData = (char*)m_MemPool.mcb_pool_new(dwBytes);
 			if(!pData)
@@ -5283,7 +5670,7 @@ namespace cb_space_server
 			int iRet = 0; char* pData = 0;
 			PDATA_HEAD pDataHead = (PDATA_HEAD)pIOC->_IOBuf_.buf;
 			if(dwBytes <= 0 || dwBytes < sizeof(DATA_HEAD) || !pDataHead || pDataHead->_DataLength_ <= 0 || 
-				(iRet = m_TimeOutProcRef.del(pSockC)) != 0 || !(pData = NewMemory(pDataHead->_DataLength_ + 1)))
+				(iRet = m_TimeOutProcRef.del(pSockC)) != 0 || !(pData = GetMemory(pDataHead->_DataLength_ + sizeof(DATA_HEAD))))
 			{
 				DelIOC(pIOC);
 				int DelSockCRet = DelSockC(pSockC);
@@ -5310,10 +5697,6 @@ namespace cb_space_server
 
 				}
 				memcpy(pData, pIOC->_IOBuf_.buf, dwBytes);
-				if(pData)
-				{
-					DelMemory(pData);
-				}
 				//------------------------>
 				char buf[8192 + 1024] = {0};
 				sprintf_s(buf, 8192 + 1024, "%s %d 发送信息 : %s [%d]\n", 
@@ -5333,7 +5716,7 @@ namespace cb_space_server
 		int HandleRecv(PSOCK_CONTEXT pSockC, PIO_CONTEXT pIOC, DWORD dwBytes)
 		{
 			char* pData = 0; int iRet = 0;
-			if(dwBytes <= 0 || (iRet = m_HeartBeatProcRef.exchange_hb(pSockC)) != 0 || !(pData = NewMemory(dwBytes + 1)))
+			if(dwBytes <= 0 || (iRet = m_HeartBeatProcRef.exchange_hb(pSockC)) != 0 || !(pData = GetMemory(dwBytes + 1)))
 			{
 				if(pData)
 				{
