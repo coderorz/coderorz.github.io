@@ -4850,7 +4850,7 @@ boob_log  cb_log;
 
 namespace cb_space_server
 {
-	typedef struct DATA_HEAD
+	typedef struct DATA_HEAD//32Bits
 	{
 		char x[4];//chbo
 		char y[4];//bodylength
