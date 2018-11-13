@@ -4847,6 +4847,10 @@ private:
 };
 
 boob_log  cb_log;
+FORCE_INLINE void* iocp_log(void* p){ cb_log.writelog((char*)p);return 0; }
+
+#define __IOCP_DEGUB__
+#define __MAX_BODYLEN__ 1024 * 1024 * 4/* 4M */
 
 namespace cb_space_server
 {
@@ -4862,38 +4866,31 @@ namespace cb_space_server
 		char n[4];
 	}DATA_HEAD, *PDATA_HEAD;
 
-#define __ERR_TIMEOUT_DEL__			0x100000
-#define __ERR_HEARTBEAT_DEL__		0x100001
-
-#define __MAX_BODYLEN__ 1024 * 1024 * 4/* 4M */
-
 	FORCE_INLINE DWORD GetBodyLength(void* p){return *((DWORD*)&((char*)(p))[4]);}
 	FORCE_INLINE void  SetBodyLength(void* p, DWORD nLength){*((DWORD*)&(((char*)(p))[4])) = nLength;}
 	FORCE_INLINE DWORD GetBusinessType(void* p){return *((int*)(&((char*)p)[8]));}
 	FORCE_INLINE void  SetBusinessType(void* p, DWORD nType){*((DWORD*)&(((char*)(p))[8])) = nType;}
 	FORCE_INLINE bool  IsHeartBeat(void* p, DWORD nType = 0x80000000){return *((DWORD*)&(((char*)(p))[8])) == nType;}
 
-	class businessbasei
-	{
-	public:
-		virtual char* _new_(int size) { size += __mem_pool_offset__; char* _p_ = new char[size]; if(!_p_){ return 0; } memset(_p_, 0, size); return (_p_ + __mem_pool_offset__); }
-		virtual void  _del_(char* p) { if(!p) return ; p -= __mem_pool_offset__; delete p, p = 0; }
-		virtual char* handlebusiness(void* pin, int ninsize, int& noutsize) = 0;
-	};
+#define __CHECK_BUSINIESS_PARAMS__(p, n) if((n) == 0) {return (delete (char*)(p), (p) = 0), 0;}
+
+	class businessbasei { public: virtual char* handlebusiness(void* pIn, int nInSize, int& nOutSize) = 0; };
+
 	class hb : public businessbasei
 	{
-		virtual char* handlebusiness(void* pin, int ninsize, int& noutsize)
+	public:
+		virtual char* handlebusiness(void* pIn, int nInSize, int& nOutSize)
 		{
-			std::string s = "接收内容:[\""; s += std::string((char*)pin, ninsize); s += "\"]";
+			__CHECK_BUSINIESS_PARAMS__(pIn, nInSize);
+
+			std::string s = "接收内容:[\""; s += std::string((char*)pIn, nInSize); s += "\"]";
 			s += "\n返回内容:[\"";
-			
 			s += "hello chenbo";
-			
 			s += "\"]\n";
-			noutsize = s.length() + sizeof(DATA_HEAD);
-			char* p = _new_(noutsize);
+			nOutSize = s.length() + sizeof(DATA_HEAD);
+			char* p = new char[nOutSize];
 			if(p){
-				memset(p, 0, noutsize);
+				memset(p, 0, nOutSize);
 
 				memcpy(p, "chbo", 4);
 				SetBodyLength(p, s.length());
@@ -4906,6 +4903,7 @@ namespace cb_space_server
 			return 0;
 		}
 	};
+
 	class businessfactory
 	{
 	public:
@@ -4925,7 +4923,14 @@ namespace cb_space_server
 	};
 
 #ifdef WIN32
-	FORCE_INLINE void* iocp_log(void* p){cb_log.writelog((char*)p);return 0;}
+
+#ifdef  __IOCP_DEGUB__
+	cb_lock_ul g_nIOCCount;
+	cb_lock_ul g_nSOCKCCount;
+#endif
+
+	class timeoutcallback_i{public: virtual int timeout_callback(void*) = 0;};
+
 	struct node;
 	struct elem
 	{
@@ -4942,11 +4947,8 @@ namespace cb_space_server
 		struct elem* m_pelemhead;
 	};
 
-	class timeoutcallback_i{public: virtual int timeout_callback(void*) = 0;};
-
 	typedef class xxx_abc
 	{
-		typedef xxx_abc __cb_class__;
 	public:
 		xxx_abc():m_del(0),m_pnodehead(0),m_tse(0),m_timeout_callback(0){}
 		~xxx_abc()
@@ -5167,7 +5169,6 @@ namespace cb_space_server
 		struct node* m_pnodehead;//超时循环链表头
 		unsigned int m_tse;//超时句柄
 
-		////////////////超时数据回调//////////////
 		timeoutcallback_i* m_timeout_callback;
 	}__cb_class__;
 
@@ -5221,28 +5222,14 @@ namespace cb_space_server
 			return iret;
 		}
 		cb_lock_ul _IOC_Count_;
-		cb_lock_ul _IOC_Lock_;
 
-		void lock(void)
-		{
-			while(cb_lockcompareexchange(_IOC_Lock_, 1, 0) == 1);
-		}
-		void unlock(){ cb_lockexchange(_IOC_Lock_, 0); }
+		cb_lock_ul _IOC_Lock_;
+		void lock(void){ while(cb_lockcompareexchange(_IOC_Lock_, 1, 0) == 1); }
+		void unlock(void){ cb_lockexchange(_IOC_Lock_, 0); }
 		
 		SOCKADDR_IN	_SockC_ClientAddr_;
 		SOCKET		_SockC_Socket_;
 	}SOCK_CONTEXT, *PSOCK_CONTEXT;
-
-	class CSockC_IOCMgr
-	{
-	public:
-		CSockC_IOCMgr(){}
-		~CSockC_IOCMgr(){}
-	public:
-
-	private:
-
-	};
 
 	class iocp_tcp_coderorz : public timeoutcallback_i
 	{
@@ -5261,7 +5248,14 @@ namespace cb_space_server
 			iocp_tcp_coderorz*	tp_this;
 		};
 
-		iocp_tcp_coderorz():m_hiocp(0),m_ListenSock(~0),m_lpfnacceptex(0),m_lpfngetacceptexsockaddrs(0),m_lpfndisconnectex(0){}
+		iocp_tcp_coderorz():m_hiocp(0),m_ListenSock(~0),m_lpfnacceptex(0),m_lpfngetacceptexsockaddrs(0),m_lpfndisconnectex(0)
+		{
+#ifdef  __IOCP_DEGUB__
+			g_nIOCCount = 0;
+			g_nSOCKCCount = 0;
+#endif
+		}
+
 		iocp_tcp_coderorz(const iocp_tcp_coderorz& ref);
 		iocp_tcp_coderorz& operator=(const iocp_tcp_coderorz& ref);
 
@@ -5272,6 +5266,10 @@ namespace cb_space_server
 			cb_closesock(m_ListenSock);
 			CloseHandle(m_hiocp);
 			WSACleanup();
+#ifdef __IOCP_DEGUB__
+			cb_log(iocp_log, "iocp", "info", 0, 0, "iocp use ioc   count[%ld]", g_nIOCCount);
+			cb_log(iocp_log, "iocp", "info", 0, 0, "iocp use sockc count[%ld]", g_nSOCKCCount);
+#endif
 		}
 
 		static iocp_tcp_coderorz& instance(void){static iocp_tcp_coderorz ref; return ref;}
@@ -5346,8 +5344,8 @@ namespace cb_space_server
 				cb_thread_close_fd(tfd);
 			}
 
-			m_TimeOutProcRef.start(this, 500, 10);		//5s一次轮询
-			m_HeartBeatProcRef.start(this, 1000, 15);	//15s一次轮询
+			m_TimeOutProcRef.start(this, 300, 10);		//3s一次轮询
+			m_HeartBeatProcRef.start(this, 1000, 30);	//30s一次轮询
 
 			for(int i = 0; i < 10; ++i)
 			{
@@ -5389,14 +5387,18 @@ namespace cb_space_server
 			else{
 				memset(pSockC, 0, sizeof(SOCK_CONTEXT));
 			}
-			cb_log(iocp_log, "iocp", "info", 0, 0, "GetSockC...[%x]", pSockC);
+#ifdef __IOCP_DEGUB__
+			cb_lockexadd(g_nSOCKCCount, 1);
+#endif
 			return pSockC;
 		}
 
 		void DelSockC(PSOCK_CONTEXT pSockC)
 		{
 			m_SockC_Pool.delobj(pSockC);
-			cb_log(iocp_log, "iocp", "info", 0, 0, "DelSockC...");
+#ifdef __IOCP_DEGUB__
+			cb_lockexadd(g_nSOCKCCount, -1);
+#endif
 		}
 
 		PIO_CONTEXT GetIOC(IO_TYPE _IO_Type, int size = 8 * 1024)
@@ -5433,7 +5435,9 @@ namespace cb_space_server
 			}
 			pIOC->_IO_Type_ = _IO_Type;
 			pIOC->_IOBuf_.len = size;
-			cb_log(iocp_log, "iocp", "info", 0, 0, "GetIOC...");
+#ifdef __IOCP_DEGUB__
+			cb_lockexadd(g_nIOCCount, 1);
+#endif
 			return pIOC;
 		}
 
@@ -5464,7 +5468,9 @@ namespace cb_space_server
 					m_MemPool.mcb_pool_del(pIOC->_IOBuf_.buf); pIOC->_IOBuf_.buf = 0;
 				}
 				m_IOC_Pool.delobj(pIOC);
-				cb_log(iocp_log, "iocp", "info", 0, 0, "DelIOC...");
+#ifdef __IOCP_DEGUB__
+				cb_lockexadd(g_nIOCCount, -1);
+#endif
 			}
 		}
 
@@ -5497,6 +5503,9 @@ namespace cb_space_server
 			//Node 被锁,不可能被其它的线程从 Node 上 Del 掉
 			PSOCK_CONTEXT pSockC = (PSOCK_CONTEXT)p;
 			pSockC->lock();
+#ifdef __IOCP_DEGUB__
+			cb_log(iocp_log, "iocp", "info", 0, 0, "TMCS [%d] ...", pSockC->_SockC_Socket_);
+#endif
 			if(pSockC->_IOC_Count_ > 0)
 			{
 				//重用socket
@@ -5573,31 +5582,27 @@ namespace cb_space_server
 			pSockC->unlock();
 		}
 
-// 		int ReuseSocket(SOCKET Sock, LPOVERLAPPED pOL = 0)
-// 		{
-// 			if(!pOL){
-// 				cb_closesock(sock);
-// 				return 0;
-// 			}
-// 			struct linger so_linger;
-// 			so_linger.l_onoff = 1; so_linger.l_linger = 0;
-// 			int iRet = setsockopt(sock, SOL_SOCKET, SO_DONTLINGER, (const char*)&so_linger, sizeof(so_linger));
-// 			if(iRet)
-// 			{
-// 				if(m_lpfndisconnectex(sock, pOL/*不为空,异步可能返回error_io_pending,属于正常操作*/, TF_REUSE_SOCKET, 0))
-// 				{
-// 					// 重用 SOCKET
-// 
-// 					return 0;
-// 				}
-// 				else{
-// 					return -1;
-// 				}
-// 			}
-// 			else{
-// 				return -1;
-// 			}
-// 		}
+		int ReuseSocket(SOCKET Sock)
+		{
+			struct linger so_linger; so_linger.l_onoff = 1; so_linger.l_linger = 0;
+			int iRet = setsockopt(Sock, SOL_SOCKET, SO_DONTLINGER, (const char*)&so_linger, sizeof(so_linger));
+			if(iRet)
+			{
+
+				if(m_lpfndisconnectex(Sock, NULL, TF_REUSE_SOCKET, 0))
+				{
+					// 重用 SOCKET
+
+					return 0;
+				}
+				else{
+					return -1;
+				}
+			}
+			else{
+				return -2;
+			}
+		}
 	private:
 		PIO_CONTEXT HandleBusiness(char* psrc, int nsrclen)
 		{
@@ -5615,13 +5620,15 @@ namespace cb_space_server
 						pIOC->_IOBufLen_	= pIOC->_IOBuf_.len;
 						pIOC->_IOBuf_.len	= ndstlen;	//发送数据字节数
 						pIOC->_IODataIndex_ = 0;
-						pbusinessbase->_del_(pbs);
+						pbusinessbase->handlebusiness(pbs, 0, ndstlen);
 						return pIOC;
 					}
-					pbusinessbase->_del_(pbs);
+					pbusinessbase->handlebusiness(pbs, 0, ndstlen);
 				}
 				else{
+#ifdef __IOCP_DEGUB__
 					cb_log(iocp_log, "iocp", "err", 0, 0, "HandleBusiness Error [%x][%d]", pbs, ndstlen);
+#endif
 				}
 			}
 			return 0;
@@ -5689,7 +5696,9 @@ namespace cb_space_server
 				(LPSOCKADDR*)&pServerSockAddr, &nServerAddrLen, (LPSOCKADDR*)&pClientSockAddr, &nClentAddrLen);
 			
 			//检测IP是否合法,或者过滤特定IP
-			cb_log(iocp_log, "iocp", "info", 0, 0, "Accept IP[%s], PORT[%d] ...", inet_ntoa(pClientSockAddr->sin_addr), ntohs(pClientSockAddr->sin_port));
+#ifdef __IOCP_DEGUB__
+			cb_log(iocp_log, "iocp", "info", 0, 0, "Accept IP[%s], PORT[%d] [%d] ...", inet_ntoa(pClientSockAddr->sin_addr), ntohs(pClientSockAddr->sin_port), pListenIOC->_Listen_IO_Sock_);
+#endif
 			
 			PSOCK_CONTEXT pSockC = GetSockC();
 			if(pSockC)
@@ -5713,7 +5722,9 @@ namespace cb_space_server
 						{
 							goto _label_postlistenio_;
 						}
+#ifdef __IOCP_DEGUB__
 						cb_log(iocp_log, "iocp", "err", 0, 0, "DoAccept WSARecv Error [%d]", cb_errno);
+#endif
 
 						//pSockC->DelIOCount();//不需要, 后面直接删除 DelSockC(pSockC);
 
@@ -5722,21 +5733,31 @@ namespace cb_space_server
 						DelIOC(pIOC, false);
 					}
 					else{
+#ifdef __IOCP_DEGUB__
 						cb_log(iocp_log, "iocp", "err", 0, 0, "DoAccept GetIOC(0)");
+#endif
 					}
 				}
 				else{
+#ifdef __IOCP_DEGUB__
 					cb_log(iocp_log, "iocp", "err", 0, 0, "DoAccept CreateIoCompletionPort(false)[%d]", cb_errno);
+#endif
 				}
 				//重用socket
-				SOCKET Sock = pSockC->_SockC_Socket_; pSockC->_SockC_Socket_ = INVALID_SOCKET; cb_closesock(Sock);
+				SOCKET Sock = pSockC->_SockC_Socket_; pSockC->_SockC_Socket_ = INVALID_SOCKET;
+				
+				cb_closesock(Sock);
 
 				DelSockC(pSockC);
 			}
 			else{
+#ifdef __IOCP_DEGUB__
 				cb_log(iocp_log, "iocp", "err", 0, 0, "DoAccept GetSOCKC(0)");
+#endif
 				//重用socket
-				SOCKET Sock = pListenIOC->_Listen_IO_Sock_; pListenIOC->_Listen_IO_Sock_ = INVALID_SOCKET; cb_closesock(Sock);
+				SOCKET Sock = pListenIOC->_Listen_IO_Sock_; pListenIOC->_Listen_IO_Sock_ = INVALID_SOCKET;
+				
+				cb_closesock(Sock);
 			}
 _label_postlistenio_:
 			PostListenIO(pListenIOC);
@@ -5749,13 +5770,17 @@ _label_postlistenio_:
 			{
 				if(!(pListenIOC = m_ListenIOC_Pool.newobj()))
 				{
+#ifdef __IOCP_DEGUB__
 					cb_log(iocp_log, "iocp", "err", 0, 0, "PostListenIO new pListenIOC(0)");
+#endif
 					return -1;
 				}
 				pListenIOC->_ListenIOBuf_.buf = (char*)m_MemPool.mcb_pool_new(size);
 				if(!pListenIOC->_ListenIOBuf_.buf)
 				{
+#ifdef __IOCP_DEGUB__
 					cb_log(iocp_log, "iocp", "err", 0, 0, "PostListenIO new pListenIOC[buf](0)");
+#endif
 					m_ListenIOC_Pool.delobj(pListenIOC);
 					pListenIOC = 0;
 					return -2;
@@ -5766,7 +5791,9 @@ _label_postlistenio_:
 			pListenIOC->_Listen_IO_Sock_ = WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED);
 			if(pListenIOC->_Listen_IO_Sock_ == INVALID_SOCKET)
 			{
+#ifdef __IOCP_DEGUB__
 				cb_log(iocp_log, "iocp", "err", 0, 0, "PostListenIO WSASocket(INVALID_SOCKET)");
+#endif
 				if(pListenIOC->_ListenIOBuf_.buf)
 				{
 					m_MemPool.mcb_pool_del(pListenIOC->_ListenIOBuf_.buf);
@@ -5781,7 +5808,9 @@ _label_postlistenio_:
 			if(!m_lpfnacceptex(m_ListenSock, pListenIOC->_Listen_IO_Sock_, pListenIOC->_ListenIOBuf_.buf, 0, 
 				dwBytes, dwBytes, &dwBytes, &pListenIOC->_OL_) && WSA_IO_PENDING != cb_errno)
 			{
+#ifdef __IOCP_DEGUB__
 				cb_log(iocp_log, "iocp", "err", 0, 0, "PostListenIO m_lpfnacceptex(false)");
+#endif
 				if(pListenIOC->_ListenIOBuf_.buf)
 				{
 					m_MemPool.mcb_pool_del(pListenIOC->_ListenIOBuf_.buf);
@@ -5789,7 +5818,11 @@ _label_postlistenio_:
 				}
 				pListenIOC->_ListenIOBuf_.len = 0;
 
-				cb_closesock(pListenIOC->_Listen_IO_Sock_);//重用socket
+				//重用socket
+				SOCKET Sock = pListenIOC->_Listen_IO_Sock_; pListenIOC->_Listen_IO_Sock_ = INVALID_SOCKET;
+				
+				cb_closesock(Sock);
+
 				return -4;
 			}
 			return 0;
@@ -5819,18 +5852,26 @@ _label_postlistenio_:
 			int nFlag = m_TimeOutProcRef.del(pSockC);
 			if(nFlag != 0)
 			{
-				cb_log(iocp_log, "iocp", "err", 0, 0, "[%ld] [%d]", __ERR_TIMEOUT_DEL__, nFlag);
+#ifdef __IOCP_DEGUB__
+				cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv TimeOutRef del return [%d][%d]", nFlag, pSockC->_SockC_Socket_);
+#endif
 				//重用socket
-				SOCKET Sock = pSockC->_SockC_Socket_; pSockC->_SockC_Socket_ = INVALID_SOCKET; cb_closesock(Sock);
+				SOCKET Sock = pSockC->_SockC_Socket_; pSockC->_SockC_Socket_ = INVALID_SOCKET;
+				
+				cb_closesock(Sock);
 				
 				DelIOC(pIOC, false); DelSockC(pSockC);
 				return -1;
 			}
 			if(dwBytes < sizeof(DATA_HEAD))
 			{
-				cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv Error %d (RecvSize) < %d (sizeof(DATA_HEAD))", dwBytes, sizeof(DATA_HEAD));
+#ifdef __IOCP_DEGUB__
+				cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv Error %d (RecvSize) < %d (sizeof(DATA_HEAD))[%d]", dwBytes, sizeof(DATA_HEAD), pSockC->_SockC_Socket_);
+#endif
 				//重用socket
-				SOCKET Sock = pSockC->_SockC_Socket_; pSockC->_SockC_Socket_ = INVALID_SOCKET; cb_closesock(Sock);
+				SOCKET Sock = pSockC->_SockC_Socket_; pSockC->_SockC_Socket_ = INVALID_SOCKET;
+				
+				cb_closesock(Sock);
 
 				DelIOC(pIOC, false); DelSockC(pSockC);
 				return -2;
@@ -5838,9 +5879,13 @@ _label_postlistenio_:
 			DWORD nBodyLen = GetBodyLength(pIOC->_IOBuf_.buf);
 			if(nBodyLen < 0 || nBodyLen > __MAX_BODYLEN__)
 			{
-				cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv Error(nBodyLen) [%d]", nBodyLen);
+#ifdef __IOCP_DEGUB__
+				cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv Error(nBodyLen) [%d][%d]", nBodyLen, pSockC->_SockC_Socket_);
+#endif
 				//重用socket
-				SOCKET Sock = pSockC->_SockC_Socket_; pSockC->_SockC_Socket_ = INVALID_SOCKET; cb_closesock(Sock);
+				SOCKET Sock = pSockC->_SockC_Socket_; pSockC->_SockC_Socket_ = INVALID_SOCKET;
+				
+				cb_closesock(Sock);
 
 				DelIOC(pIOC, false); DelSockC(pSockC);
 				return -3;
@@ -5859,7 +5904,9 @@ _continue_business_:
 					pIOC->_IOBuf_.len	 = pIOC->_IOBufLen_ - _dwBytes;
 				}
 				else{
-					cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv Error(ExpendIOCBuf false)[%ld][%ld]", _dwBytes, _nBodyLen);
+#ifdef __IOCP_DEGUB__
+					cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv Error(ExpendIOCBuf false)[%ld][%ld][%d]", _dwBytes, _nBodyLen, pSockC->_SockC_Socket_);
+#endif
 					m_HeartBeatProcRef.del(pSockC);
 					CloseSockSession(pSockC, pIOC);
 					return -4;
@@ -5874,27 +5921,46 @@ _continue_business_:
 					pIOC->_IOBuf_.len	 = pIOC->_IOBufLen_ - _dwBytes;
 				}
 				else{
-					PIO_CONTEXT pSendIOC = HandleBusiness(pIOC->_IOBuf_.buf, _nBodyLen + sizeof(DATA_HEAD));
-					if(pSendIOC)
+					if(IsHeartBeat(pIOC->_IOBuf_.buf))
 					{
-						pSockC->AddIOCount(); //新IOC才会添加
-						DWORD dwBytesSend(0);
-						if(SOCKET_ERROR == WSASend(pSockC->_SockC_Socket_, &pSendIOC->_IOBuf_, 1, &dwBytesSend, 0, &pSendIOC->_OL_, NULL) 
-							&& (WSA_IO_PENDING != cb_errno))
+						int iRet(0);
+						if((iRet = m_HeartBeatProcRef.exchange_hb(pSockC)) != 0)
 						{
-							//如果失败,GetQueuedCompletionStatus 会收到消息
-							cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv WSASend Error [%d]", cb_errno);
-							pSockC->DelIOCount(); DelIOC(pSendIOC, false);
+#ifdef __IOCP_DEGUB__
+							cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv Error(exchange_hb) [%d][%d]", iRet, pSockC->_SockC_Socket_);
+#endif
 							m_HeartBeatProcRef.del(pSockC);
 							CloseSockSession(pSockC, pIOC);
 							return -5;
 						}
 					}
 					else{
-						cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv HandleBusiness Error");
-						m_HeartBeatProcRef.del(pSockC);
-						CloseSockSession(pSockC, pIOC);
-						return -6;
+						PIO_CONTEXT pSendIOC = HandleBusiness(pIOC->_IOBuf_.buf, _nBodyLen + sizeof(DATA_HEAD));
+						if(pSendIOC)
+						{
+							pSockC->AddIOCount(); //新IOC才会添加
+							DWORD dwBytesSend(0);
+							if(SOCKET_ERROR == WSASend(pSockC->_SockC_Socket_, &pSendIOC->_IOBuf_, 1, &dwBytesSend, 0, &pSendIOC->_OL_, NULL) 
+								&& (WSA_IO_PENDING != cb_errno))
+							{
+								//如果失败,GetQueuedCompletionStatus 会收到消息
+#ifdef __IOCP_DEGUB__
+								cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv WSASend Error [%d][%d]", cb_errno, pSockC->_SockC_Socket_);
+#endif
+								pSockC->DelIOCount(); DelIOC(pSendIOC, false);
+								m_HeartBeatProcRef.del(pSockC);
+								CloseSockSession(pSockC, pIOC);
+								return -6;
+							}
+						}
+						else{
+#ifdef __IOCP_DEGUB__
+							cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv HandleBusiness Error[%d]", pSockC->_SockC_Socket_);
+#endif
+							m_HeartBeatProcRef.del(pSockC);
+							CloseSockSession(pSockC, pIOC);
+							return -7;
+						}
 					}
 					//处理后续数据
 					if((_dwBytes -= _nBodyLen + sizeof(DATA_HEAD)) > 0)
@@ -5906,10 +5972,12 @@ _continue_business_:
 							_nBodyLen = GetBodyLength(pIOC->_IOBuf_.buf);
 							if(_nBodyLen < 0 || _nBodyLen > __MAX_BODYLEN__)
 							{
-								cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv Error(nBodyLen 2) [%d]", _nBodyLen);
+#ifdef __IOCP_DEGUB__
+								cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv Error(nBodyLen 2) [%d][%d]", _nBodyLen, pSockC->_SockC_Socket_);
+#endif
 								m_HeartBeatProcRef.del(pSockC);
 								CloseSockSession(pSockC, pIOC);
-								return -7;
+								return -8;
 							}
 							goto _continue_business_;
 						}
@@ -5928,10 +5996,12 @@ _continue_business_:
 			if(SOCKET_ERROR == WSARecv(pSockC->_SockC_Socket_, &pIOC->_IOBuf_, 1, &dwBytesRecv, &dwFlagsRecv, &pIOC->_OL_, NULL) 
 				&& (WSA_IO_PENDING != cb_errno))
 			{
-				cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv WSARecv Error [%d]", cb_errno);
+#ifdef __IOCP_DEGUB__
+				cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv WSARecv Error [%d][%d]", cb_errno, pSockC->_SockC_Socket_);
+#endif
 				m_HeartBeatProcRef.del(pSockC);
 				CloseSockSession(pSockC, pIOC);
-				return -8;
+				return -9;
 			}
 			return 0;
 		}
@@ -5944,7 +6014,9 @@ _continue_business_:
 				if(pIOC->_IODataIndex_ + dwBytes < sizeof(DATA_HEAD))
 				{
 					//多次接收不完整包头,即为异常
-					cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv Error [%d][%d]", pIOC->_IODataIndex_, dwBytes);
+#ifdef __IOCP_DEGUB__
+					cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv Error [%d][%d][%d]", pIOC->_IODataIndex_, dwBytes, pSockC->_SockC_Socket_);
+#endif
 					m_HeartBeatProcRef.del(pSockC);
 					CloseSockSession(pSockC, pIOC);
 					return -1;
@@ -5961,7 +6033,9 @@ _continue_business_:
 _continue_business2_:
 					if(_nBodyLen < 0 || _nBodyLen > __MAX_BODYLEN__)
 					{
-						cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv Error(nBodyLen 0) [%d]", _nBodyLen);
+#ifdef __IOCP_DEGUB__
+						cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv Error(nBodyLen 0) [%d][%d]", _nBodyLen, pSockC->_SockC_Socket_);
+#endif
 						m_HeartBeatProcRef.del(pSockC);
 						CloseSockSession(pSockC, pIOC);
 						return -2;
@@ -5976,7 +6050,9 @@ _continue_business2_:
 							pIOC->_IOBuf_.len	 = pIOC->_IOBufLen_ - _dwBytes;
 						}
 						else{
-							cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv Error(ExpendIOCBuf false)[%ld][%ld]", _dwBytes, _nBodyLen);
+#ifdef __IOCP_DEGUB__
+							cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv Error(ExpendIOCBuf false)[%ld][%ld][%d]", _dwBytes, _nBodyLen, pSockC->_SockC_Socket_);
+#endif
 							m_HeartBeatProcRef.del(pSockC);
 							CloseSockSession(pSockC, pIOC);
 							return -3;
@@ -5996,7 +6072,9 @@ _continue_business2_:
 								int iRet(0);
 								if((iRet = m_HeartBeatProcRef.exchange_hb(pSockC)) != 0)
 								{
-									cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv Error(exchange_hb) [%d]", iRet);
+#ifdef __IOCP_DEGUB__
+									cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv Error(exchange_hb) [%d][%d]", iRet, pSockC->_SockC_Socket_);
+#endif
 									m_HeartBeatProcRef.del(pSockC);
 									CloseSockSession(pSockC, pIOC);
 									return -4;
@@ -6011,7 +6089,9 @@ _continue_business2_:
 									if(SOCKET_ERROR == WSASend(pSockC->_SockC_Socket_, &pSendIOC->_IOBuf_, 1, &dwBytesSend, 0, &pSendIOC->_OL_, NULL) 
 										&& (WSA_IO_PENDING != cb_errno))
 									{
-										cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv WSASend Error [%d]", cb_errno);
+#ifdef __IOCP_DEGUB__
+										cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv WSASend Error [%d][%d]", cb_errno, pSockC->_SockC_Socket_);
+#endif
 										pSockC->DelIOCount(); DelIOC(pSendIOC);
 										m_HeartBeatProcRef.del(pSockC);
 										CloseSockSession(pSockC, pIOC);
@@ -6019,7 +6099,9 @@ _continue_business2_:
 									}
 								}
 								else{
-									cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv HandleBusiness Error");
+#ifdef __IOCP_DEGUB__
+									cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv HandleBusiness Error[%d]", pSockC->_SockC_Socket_);
+#endif
 									m_HeartBeatProcRef.del(pSockC);
 									CloseSockSession(pSockC, pIOC);
 									return -6;
@@ -6035,7 +6117,9 @@ _continue_business2_:
 									_nBodyLen = GetBodyLength(pIOC->_IOBuf_.buf);
 									if(_nBodyLen < 0 || _nBodyLen > __MAX_BODYLEN__)
 									{
-										cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv Error(nBodyLen 1) [%d]", _nBodyLen);
+#ifdef __IOCP_DEGUB__
+										cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv Error(nBodyLen 1) [%d][%d]", _nBodyLen, pSockC->_SockC_Socket_);
+#endif
 										m_HeartBeatProcRef.del(pSockC);
 										CloseSockSession(pSockC, pIOC);
 										return -7;
@@ -6055,7 +6139,9 @@ _continue_business2_:
 					if(SOCKET_ERROR == WSARecv(pSockC->_SockC_Socket_, &pIOC->_IOBuf_, 1, &dwBytesRecv, &dwFlagsRecv, &pIOC->_OL_, NULL) 
 						&& (WSA_IO_PENDING != cb_errno))
 					{
-						cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv WSARecv Error [%d]", cb_errno);
+#ifdef __IOCP_DEGUB__
+						cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv WSARecv Error [%d][%d]", cb_errno, pSockC->_SockC_Socket_);
+#endif
 						m_HeartBeatProcRef.del(pSockC);
 						CloseSockSession(pSockC, pIOC);
 						return -8;
@@ -6066,7 +6152,9 @@ _continue_business2_:
 			else{
 				if(dwBytes < sizeof(DATA_HEAD))
 				{
-					cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv Error %d (RecvSize) < %d (sizeof(DATA_HEAD))", dwBytes, sizeof(DATA_HEAD));
+#ifdef __IOCP_DEGUB__
+					cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv Error %d (RecvSize) < %d (sizeof(DATA_HEAD))[%d]", dwBytes, sizeof(DATA_HEAD), pSockC->_SockC_Socket_);
+#endif
 					//完整的数据报,不能缺失包头
 					m_HeartBeatProcRef.del(pSockC);
 					CloseSockSession(pSockC, pIOC);
@@ -6082,7 +6170,9 @@ _continue_business2_:
 		{
 			if(pIOC->_IODataIndex_ == 0 && dwBytes < sizeof(DATA_HEAD))
 			{
-				cb_log(iocp_log, "iocp", "err", 0, 0, "HandleSend Error [%d]", dwBytes);
+#ifdef __IOCP_DEGUB__
+				cb_log(iocp_log, "iocp", "err", 0, 0, "HandleSend Error [%d][%d]", dwBytes, pSockC->_SockC_Socket_);
+#endif
 				//首次发送低于包头即为异常
 				m_HeartBeatProcRef.del(pSockC);
 				CloseSockSession(pSockC, pIOC);
@@ -6098,7 +6188,9 @@ _continue_business2_:
 				if(SOCKET_ERROR == WSASend(pSockC->_SockC_Socket_, &pIOC->_IOBuf_, 1, &dwBytesSend, 0, &pIOC->_OL_, NULL) 
 					&& (WSA_IO_PENDING != cb_errno))
 				{
-					cb_log(iocp_log, "iocp", "err", 0, 0, "HandleSend WSASend Error [%d]", cb_errno);
+#ifdef __IOCP_DEGUB__
+					cb_log(iocp_log, "iocp", "err", 0, 0, "HandleSend WSASend Error [%d][%d]", cb_errno, pSockC->_SockC_Socket_);
+#endif
 					m_HeartBeatProcRef.del(pSockC);
 					CloseSockSession(pSockC, pIOC);
 					return -2;
@@ -6120,7 +6212,7 @@ _continue_business2_:
 		cb_space_memorypool::obj_pool<SOCK_CONTEXT> m_SockC_Pool;
 		cb_space_memorypool::obj_pool<IO_CONTEXT> m_IOC_Pool;
 		cb_space_memorypool::mem_pool m_MemPool;
-	private:
+
 		__cb_class__				m_TimeOutProcRef;
 		__cb_class__				m_HeartBeatProcRef;
 	};
