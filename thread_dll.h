@@ -4794,8 +4794,12 @@ namespace cb_space_thread
 class boob_log
 {
 public:
-	boob_log():lock(0)
+	boob_log(const std::string& logPath = ""):lock(0),m_LogPath(logPath)
 	{
+		if(m_LogPath.empty())
+		{
+			m_LogPath = "D:\\MyLog\\log.txt";
+		}
 	}
 
 	~boob_log()
@@ -4803,7 +4807,7 @@ public:
 		if(strlist.size())
 		{
 			FILE * fp(NULL);
-			int flag = fopen_s(&fp, "D:\\MyLog\\log.txt","a");
+			int flag = fopen_s(&fp, m_LogPath.c_str(),"a");
 			for(std::vector<std::string>::iterator iter = strlist.begin(); iter != strlist.end(); ++iter){
 				if(fp)
 					fwrite(iter->c_str(), iter->size(), 1, fp);
@@ -4820,11 +4824,11 @@ public:
 		//return ;
 		while(InterlockedCompareExchange(&lock, 1, 0) == 1);
 		{
-			if(strlist.size() >= 10)
+			if(strlist.size() >= 100)
 			{
 				FILE * fp(NULL);
 				strlist.push_back(str);
-				int flag = fopen_s(&fp, "D:\\MyLog\\log.txt","a");
+				int flag = fopen_s(&fp, m_LogPath.c_str(),"a");
 				for(std::vector<std::string>::iterator iter = strlist.begin(); iter != strlist.end(); ++iter){
 					if(fp)
 						fwrite(iter->c_str(), iter->size(), 1, fp);
@@ -4843,6 +4847,7 @@ public:
 	}
 private:
 	volatile long lock;
+	std::string m_LogPath;
 	std::vector<std::string> strlist;
 };
 
@@ -4854,7 +4859,8 @@ FORCE_INLINE void* iocp_log(void* p){ cb_log.writelog((char*)p);return 0; }
 
 namespace cb_space_server
 {
-	typedef struct DATA_HEAD//32Bits
+	//32Bits
+	typedef struct DATA_HEAD
 	{
 		char x[4];//chbo
 		char y[4];//bodylength
@@ -4871,6 +4877,8 @@ namespace cb_space_server
 	FORCE_INLINE DWORD GetBusinessType(void* p){return *((int*)(&((char*)p)[8]));}
 	FORCE_INLINE void  SetBusinessType(void* p, DWORD nType){*((DWORD*)&(((char*)(p))[8])) = nType;}
 	FORCE_INLINE bool  IsHeartBeat(void* p, DWORD nType = 0x80000000){return *((DWORD*)&(((char*)(p))[8])) == nType;}
+	FORCE_INLINE void  SetHeartBeatType(void* p, DWORD nType = 0x80000000){*((DWORD*)&(((char*)(p))[8])) = nType;}
+
 
 #define __CHECK_BUSINIESS_PARAMS__(p, n) if((n) == 0) {return (delete (char*)(p), (p) = 0), 0;}
 
@@ -4897,7 +4905,6 @@ namespace cb_space_server
 				SetBusinessType(p, 0);
 				memcpy(p + sizeof(DATA_HEAD), s.c_str(), s.length());
 
-				printf(s.c_str());
 				return p;
 			}
 			return 0;
@@ -4950,14 +4957,50 @@ namespace cb_space_server
 	typedef class xxx_abc
 	{
 	public:
-		xxx_abc():m_del(0),m_pnodehead(0),m_tse(0),m_timeout_callback(0){}
+		xxx_abc():m_del(0),m_pnodehead(0),m_tse(0),m_timeout_callback(0),m_bTMFlag(false){}
 		~xxx_abc()
+		{
+			stop();
+		}
+	public:
+		int start(timeoutcallback_i* pcallback, unsigned int udelay = 1000, unsigned int usize = 10, bool bTM = true/*是否超时删除,默认true*/)
+		{
+			if(!pcallback)
+				return -1;
+			m_timeout_callback = pcallback;
+			m_bTMFlag = bTM;
+			if(!m_pnodehead)
+			{
+				char* p = new(std::nothrow)char[sizeof(struct node) * (usize <= 1 ? (usize = 10) : usize)];
+				if(!p)
+					return -2;
+				memset(p, 0, sizeof(struct node) * usize);
+
+				m_del = p;
+				m_pnodehead = (struct node*)p;
+
+				((struct node*)p)[0].m_pprevnode = &((struct node*)p)[usize - 1];
+				((struct node*)p)[usize - 1].m_pnextnode = (struct node*)p;
+				for(unsigned int i = 0; i < usize - 1; ++i)
+				{
+					((struct node*)p)[i].m_pnextnode = &(((struct node*)p)[i + 1]);
+					((struct node*)p)[i + 1].m_pprevnode = &(((struct node*)p)[i]);
+				}
+			}
+
+			m_tse = timeSetEvent(udelay, 1, proc, (DWORD_PTR)this, 1);//定时每udelay毫秒执行一次
+			if(m_tse == 0)
+				return -3;
+			return 0;
+		}
+
+		int stop(void)
 		{
 			if(m_tse)
 			{
 				timeKillEvent(m_tse); m_tse = 0;
 				struct node* bhead = 0;
-				while(1)
+				while(m_bTMFlag)
 				{
 					while(cb_lockcompareexchange(m_pnodehead->m_nlocknode, 1, 0) == 1);
 					while(m_pnodehead->m_pelemhead)
@@ -4986,36 +5029,6 @@ namespace cb_space_server
 			m_pnodehead = 0;
 			if(m_del)
 				delete[] m_del, m_del = 0;
-		}
-	public:
-		int start(timeoutcallback_i* pcallback, unsigned int udelay = 1000, unsigned int usize = 10)
-		{
-			if(!pcallback)
-				return -1;
-			m_timeout_callback = pcallback;
-
-			if(!m_pnodehead)
-			{
-				char* p = new(std::nothrow)char[sizeof(struct node) * (usize <= 1 ? (usize = 10) : usize)];
-				if(!p)
-					return -2;
-				memset(p, 0, sizeof(struct node) * usize);
-
-				m_del = p;
-				m_pnodehead = (struct node*)p;
-
-				((struct node*)p)[0].m_pprevnode = &((struct node*)p)[usize - 1];
-				((struct node*)p)[usize - 1].m_pnextnode = (struct node*)p;
-				for(unsigned int i = 0; i < usize - 1; ++i)
-				{
-					((struct node*)p)[i].m_pnextnode = &(((struct node*)p)[i + 1]);
-					((struct node*)p)[i + 1].m_pprevnode = &(((struct node*)p)[i]);
-				}
-			}
-
-			m_tse = timeSetEvent(udelay, 1, proc, (DWORD_PTR)this, 1);//定时每udelay毫秒执行一次
-			if(m_tse == 0)
-				return -3;
 			return 0;
 		}
 
@@ -5143,7 +5156,10 @@ namespace cb_space_server
 		static void __stdcall proc(unsigned int , unsigned int , unsigned long pparams, unsigned long , unsigned long)
 		{
 			__cb_class__* pclass = (__cb_class__*)pparams;
-			pclass->handle();
+			if(pclass->m_bTMFlag)
+				pclass->handle();//del elem
+			else
+				pclass->handle2();
 			return ;
 		}
 
@@ -5164,10 +5180,27 @@ namespace cb_space_server
 			cb_lockexchange(pnode->m_nlocknode, 0);
 			return 0;
 		}
+
+		int handle2(void)
+		{
+			while(cb_lockcompareexchange(m_pnodehead->m_nlocknode, 1, 0) == 1);
+			struct elem* pelem = m_pnodehead->m_pelemhead;
+			while(pelem)
+			{
+				m_timeout_callback->timeout_callback(pelem);
+				pelem = pelem->m_pnextelem;
+			}
+			struct node* pnode = m_pnodehead;
+			m_pnodehead = m_pnodehead->m_pnextnode;
+			cb_lockexchange(pnode->m_nlocknode, 0);
+			return 0;
+		}
 	private:
 		char* m_del;//申请的内存(需要删除)
 		struct node* m_pnodehead;//超时循环链表头
 		unsigned int m_tse;//超时句柄
+
+		bool m_bTMFlag;//超时是否删除elem 标记, true:删除, false不需要处理
 
 		timeoutcallback_i* m_timeout_callback;
 	}__cb_class__;
@@ -5355,6 +5388,8 @@ namespace cb_space_server
 
 		void stopserver(void)
 		{
+			m_TimeOutProcRef.stop();
+			m_HeartBeatProcRef.stop();
 			int nchange = change();//每个线程保证只投递一个退出IOC
 			while(!exit())
 			{
@@ -5525,6 +5560,7 @@ namespace cb_space_server
 
 				cb_closesock(Sock);
 
+				pSockC->unlock();
 				DelSockC(pSockC);//删除不需要解锁(pSockC->unlock();),没有意义
 			}
 			return 0;
@@ -5556,6 +5592,7 @@ namespace cb_space_server
 
 				cb_closesock(Sock);
 
+				pSockC->unlock();
 				DelSockC(pSockC);//删除不需要解锁(pSockC->unlock();),没有意义
 				return ;
 			}
@@ -5573,6 +5610,7 @@ namespace cb_space_server
 
 				cb_closesock(Sock);
 
+				pSockC->unlock();
 				DelSockC(pSockC);//删除不需要解锁(pSockC->unlock();),没有意义
 				return ;
 			}
@@ -6219,6 +6257,731 @@ _continue_business2_:
 
 	class iocp_udp_coderorz
 	{
+
+	};
+
+boob_log  cb_logClient = boob_log("D:\\MyLog\\logClient.txt");
+FORCE_INLINE void* iocpclient_log(void* p){ cb_logClient.writelog((char*)p);return 0; }
+
+	class iocp_client : public timeoutcallback_i
+	{
+		typedef enum CLIENT_IO_TYPE
+		{
+			IO_TYPE_CONN,
+			IO_TYPE_RECV,
+			IO_TYPE_SEND,
+			IO_TYPE_KILL,
+		}CLIENT_IO_TYPE;
+
+		struct DLList;
+		typedef struct CLIENT_IO_CONTEXT : elem
+		{
+			OVERLAPPED		_OL_;
+			CLIENT_IO_TYPE	_IOTYPE_;
+			cb_socket		_SOCK_;
+			DWORD			_ndataLen_;
+			WSABUF			_WsaBuf_;
+			struct DLList*  _pdllist_;
+		}CLIENT_IO_CONTEXT, *PCLIENT_IO_CONTEXT;
+
+		//连接会话IO列表
+		typedef struct DLList
+		{
+			DLList():pprev(0),pnext(0),pIOC(0){}
+			struct DLList* pprev;
+			struct DLList* pnext;
+			PCLIENT_IO_CONTEXT pIOC;
+		}DLList, *PDLList;
+		PDLList m_phead; PDLList m_ptail;
+		cb_lock_ul _m_dllist_Lock_;
+		cb_lock_ul _m_dllist_count_;
+		void dllistlock(void){ while(cb_lockcompareexchange(_m_dllist_Lock_, 1, 0) == 1); }
+		void dllistunlock(void){ cb_lockexchange(_m_dllist_Lock_, 0); }
+		void push(PDLList _pdnode, bool bhead = true)
+		{
+			if(!_pdnode){
+				return ;
+			}
+			dllistlock();
+			if(!m_phead){
+				m_phead = m_ptail = _pdnode;
+			}
+			else{
+				if(bhead){
+					//直接在头部添加, 暂时不考虑优先级值
+					_pdnode->pnext = m_phead;
+					m_phead->pprev = _pdnode;
+					m_phead = _pdnode;
+				}
+				else
+				{
+					//在最后添加
+					_pdnode->pprev = m_ptail;
+					m_ptail->pnext = _pdnode;
+					m_ptail = _pdnode;
+				}
+			}
+			++_m_dllist_count_;
+			dllistunlock();
+		}
+		PDLList pop(void)
+		{
+			dllistlock();
+			if(!m_phead)
+			{
+				dllistunlock();
+				return 0;
+			}
+			else{
+				if(m_phead->pnext)
+				{
+					PDLList p = m_phead;
+					m_phead = m_phead->pnext;
+					m_phead->pprev = 0;
+					--_m_dllist_count_;
+					dllistunlock();
+					return p;
+				}
+				else{
+					PDLList p = m_phead;
+					m_phead = m_ptail = 0;
+					--_m_dllist_count_;
+					dllistunlock();
+					return p;
+				}
+			}
+			dllistunlock();
+			return 0;
+		}
+		void erase(PDLList _pdnode)
+		{
+			if(!_pdnode)
+			{
+				return ;
+			}
+			dllistlock();
+			if(_pdnode->pprev)
+			{
+				_pdnode->pprev->pnext = _pdnode->pnext;
+				if(_pdnode->pnext)
+					_pdnode->pnext->pprev = _pdnode->pprev;
+				else
+					m_ptail = _pdnode->pprev;
+				_pdnode->pprev = _pdnode->pnext = 0;
+			}
+			else{
+				m_phead = _pdnode->pnext;
+				if(m_phead)
+					m_phead->pprev = 0;
+				else
+					m_ptail = _pdnode->pprev;
+				_pdnode->pprev = _pdnode->pnext = 0;
+			}
+			--_m_dllist_count_;
+			dllistunlock();
+		}
+		int getdllistcount(void)
+		{
+			int nRet(0);
+			dllistlock();
+			nRet = _m_dllist_count_;
+			dllistunlock();
+			return nRet;
+		}
+		void InitDlList(void){ m_phead = m_ptail = 0; _m_dllist_Lock_ = 0; _m_dllist_count_ = 0; }
+		//线程退出
+		class CThreadExit
+		{
+		public:
+			CThreadExit():m_nlockexit(0){}
+			~CThreadExit(){}
+		public:
+			void add(int _add = 1){InterlockedExchangeAdd(&m_nlockexit, _add);}
+			void del(int _del = 1){InterlockedExchangeAdd(&m_nlockexit, -_del);}
+			volatile unsigned long change(void){return InterlockedCompareExchange(&m_nlockexit, 0, 0);}
+			bool exit(void){return InterlockedCompareExchange(&m_nlockexit, 0, 0) == 0;}
+		private:
+			cb_lock_ul m_nlockexit;
+		};
+		CThreadExit m_iocpthreadexit;		//处理IO线程退出
+		cb_lock_ul m_nlockconnexit;
+		CThreadExit m_iocpconnthreadexit;	//处理创建连接线程退出
+		cb_lock_ul m_nlockhbexit;
+		CThreadExit m_iocphbthreadexit;		//处理发送心跳线程退出
+		cb_lock_ul m_nlocksendexit;
+		CThreadExit m_iocpsendthreadexit;	//处理发送消息线程退出
+		//线程参数
+		struct iocp_threadparams
+		{
+			iocp_threadparams():tp_tidx(0),tp_this(0){}
+			unsigned long	tp_tidx;
+			iocp_client*	tp_this;
+		};
+
+		//需要发心跳的Socket集合
+		std::vector<cb_socket> m_vSockList;
+		cb_lock_ul m_nlock_hb;
+		void AddHBSock(cb_socket Sock)
+		{
+			while(cb_lockcompareexchange(m_nlock_hb, 1, 0) == 1);
+			m_vSockList.push_back(Sock);
+			cb_lockexchange(m_nlock_hb, 0);
+		}
+		cb_socket GetHBSock(void)
+		{
+			while(cb_lockcompareexchange(m_nlock_hb, 1, 0) == 1);
+			cb_socket Sock = INVALID_SOCKET;
+			if(m_vSockList.size() > 0)
+			{
+				Sock = m_vSockList.front();
+				m_vSockList.erase(m_vSockList.begin());
+			}
+			cb_lockexchange(m_nlock_hb, 0);
+			return Sock;
+		}
+
+		iocp_client(const iocp_client& ref);
+		iocp_client& operator=(const iocp_client& ref);
+
+		iocp_client():m_hIOCP(NULL),m_lpConnectEx(NULL)
+		{
+			WSAData wsaData; ::WSAStartup(MAKEWORD(2,2), &wsaData);
+			::ZeroMemory(&m_Remote_Addr, sizeof(m_Remote_Addr));
+			InitDlList();
+			m_nlockconnexit = 0;
+			m_nlockhbexit = 0;
+			m_nlocksendexit = 0;
+			m_nlock_hb = 0;
+			m_vSockList.clear();
+		}
+	public:
+		static iocp_client& instance(void){static iocp_client ref; return ref;}
+
+		virtual ~iocp_client()
+		{
+			Stop();
+			CloseHandle(m_hIOCP);
+			::ZeroMemory(&m_Remote_Addr, sizeof(m_Remote_Addr));
+			WSACleanup();
+		}
+	public:
+		//Send HeartBeat Package
+		int timeout_callback(void* p)
+		{
+			PCLIENT_IO_CONTEXT pIOC = (PCLIENT_IO_CONTEXT)p;
+			cb_socket Sock(pIOC->_SOCK_);
+			if(Sock != INVALID_SOCKET)
+			{
+				AddHBSock(Sock);
+			}
+			return 0;
+		}
+
+		void Start(const std::string& IP, int PORT)
+		{
+			if((m_hIOCP = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 1)) == NULL)
+			{
+				cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client Start CreateIoCompletionPort ERROR[%d]", cb_errno);
+				return ;
+			}
+
+			m_Remote_Addr.sin_addr.s_addr = inet_addr(IP.c_str());
+			m_Remote_Addr.sin_port = htons(PORT);
+			m_Remote_Addr.sin_family = AF_INET;
+
+			cb_socket tSock = ::WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
+			if(tSock == INVALID_SOCKET)
+			{
+				cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client Start WSASocket ERROR[%d]", cb_errno);				return ;
+			}
+
+			DWORD dwBytes(0); GUID AcceptEX = WSAID_CONNECTEX;			if(WSAIoctl(tSock, SIO_GET_EXTENSION_FUNCTION_POINTER, &AcceptEX, sizeof(AcceptEX), &m_lpConnectEx, sizeof(m_lpConnectEx), &dwBytes, NULL, NULL) != 0)
+			{
+				cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client Start WSAIoctl ERROR[%d]", cb_errno);
+				cb_closesock(tSock);				return ;
+			}
+			cb_closesock(tSock);
+
+			m_HeartBeatProcRef.start(this, 1000, 10, false);	//10s一次轮询 回调 timeout_callback
+
+			for(unsigned long i = 0; i < 1; ++i)
+			{
+				iocp_threadparams* ptp = new iocp_threadparams;
+				ptp->tp_tidx = i;
+				ptp->tp_this = this;
+				cb_thread_fd tfd;
+				cb_thread_create(tfd, client_iocp_proc, ptp);
+				cb_thread_fail(tfd);
+				cb_thread_close_fd(tfd);
+			}
+
+			for(unsigned long i = 0; i < 1; ++i)
+			{
+				iocp_threadparams* ptp = new iocp_threadparams;
+				ptp->tp_tidx = i;
+				ptp->tp_this = this;
+				cb_thread_fd tfd;
+				cb_thread_create(tfd, create_conn_proc, ptp);
+				cb_thread_fail(tfd);
+				cb_thread_close_fd(tfd);
+			}
+
+			for(unsigned long i = 0; i < 1; ++i)
+			{
+				iocp_threadparams* ptp = new iocp_threadparams;
+				ptp->tp_tidx = i;
+				ptp->tp_this = this;
+				cb_thread_fd tfd;
+				cb_thread_create(tfd, send_heartbeat_proc, ptp);
+				cb_thread_fail(tfd);
+				cb_thread_close_fd(tfd);
+			}
+
+			for(unsigned long i = 0; i < 1; ++i)
+			{
+				iocp_threadparams* ptp = new iocp_threadparams;
+				ptp->tp_tidx = i;
+				ptp->tp_this = this;
+				cb_thread_fd tfd;
+				cb_thread_create(tfd, send_message_proc, ptp);
+				cb_thread_fail(tfd);
+				cb_thread_close_fd(tfd);
+			}
+		}
+		
+		void Stop(void)
+		{
+			//发送消息线程退出
+			if(cb_lockcompareexchange(m_nlocksendexit, 1, 0) == 0)
+			{
+				while(!m_iocpsendthreadexit.exit())
+				{
+					cb_sleep(100);
+				}
+			}
+			
+			//发送心跳包线程退出
+			if(cb_lockcompareexchange(m_nlockhbexit, 1, 0) == 0)
+			{
+				while(!m_iocphbthreadexit.exit())
+				{
+					cb_sleep(100);
+				}
+			}
+			//创建连接线程退出
+			if(cb_lockcompareexchange(m_nlockconnexit, 1, 0) == 0)
+			{
+				while(!m_iocpconnthreadexit.exit())
+				{
+					cb_sleep(100);
+				}
+			}
+			//会话IO处理线程退出
+			int nchange = m_iocpthreadexit.change();//每个线程保证只投递一个退出IOC
+			while(nchange > 0 && !m_iocpthreadexit.exit())
+			{
+				if(nchange == m_iocpthreadexit.change())
+				{
+					SOCKET Sock = ::WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
+					if(Sock == INVALID_SOCKET)
+					{
+						//cb_log(iocpclient_log, "iocp", "err", 0, 0, "Stop WSASocket [%d]", cb_errno);
+					}
+					else{
+						PCLIENT_IO_CONTEXT pExitIOC = GetIOC(IO_TYPE_KILL, Sock, 32);
+						PostQueuedCompletionStatus(m_hIOCP, 0, (ULONG_PTR)Sock, &pExitIOC->_OL_);
+						--nchange;
+					}
+				}
+				else{
+					Sleep(100);
+				}
+			}
+		}
+
+		static unsigned int __stdcall client_iocp_proc(void* p)
+		{
+			iocp_threadparams* tp = (iocp_threadparams*)p;
+			iocp_client* tp_this  = tp->tp_this; tp_this->m_iocpthreadexit.add();//thread run + 1, exit - 1
+			unsigned long tp_tid  = GetCurrentThreadId();
+			cb_log(iocpclient_log, "iocp", "iocp_sys", 0, 0, "iocp_client[%03d:%05d] client_iocp_proc start...", tp->tp_tidx + 1, tp_tid);
+			HANDLE _hIOCP		  = tp_this->m_hIOCP;
+			DWORD dwBytes(0); PCLIENT_IO_CONTEXT pCKEY; LPOVERLAPPED pIOCP_OL(NULL);
+			while(true)
+			{
+				if(GetQueuedCompletionStatus(_hIOCP, &dwBytes, (PULONG_PTR)&pCKEY, &pIOCP_OL, INFINITE))
+				{
+					PCLIENT_IO_CONTEXT pIOC = CONTAINING_RECORD(pIOCP_OL, CLIENT_IO_CONTEXT, _OL_);
+					if(dwBytes > 0 || (dwBytes == 0 && IO_TYPE_CONN == pIOC->_IOTYPE_))
+					{
+						tp_this->HandleIOCP(pIOC, dwBytes);
+					}
+					else if(dwBytes == 0)
+					{
+						if(pIOC->_IOTYPE_ == IO_TYPE_KILL)
+						{
+							cb_log(iocpclient_log, "iocp", "iocp_sys", 0, 0, "iocp[%03d:%05d] client_iocp_proc stop...", tp->tp_tidx + 1, tp_tid);
+							tp_this->DelIOC(pIOC);
+							tp_this->m_iocpthreadexit.del();							break;
+						}
+						else{
+							tp_this->DelIOC(pIOC);
+						}
+					}
+				}
+				else{
+					if(pIOCP_OL)
+					{
+						PCLIENT_IO_CONTEXT pIOC = CONTAINING_RECORD(pIOCP_OL, CLIENT_IO_CONTEXT, _OL_);
+						if(pIOC)
+						{
+							tp_this->DelIOC(pIOC);
+						}
+					}
+				}
+			}
+			delete tp, tp = 0;
+			return 0;
+		}
+
+		static unsigned int __stdcall create_conn_proc(void* p)
+		{
+			iocp_threadparams* tp = (iocp_threadparams*)p;
+			iocp_client* tp_this  = tp->tp_this; tp_this->m_iocpconnthreadexit.add();//thread run + 1, exit - 1
+			unsigned long tp_tid  = GetCurrentThreadId();
+			cb_log(iocpclient_log, "iocp", "iocp_sys", 0, 0, "iocp_client[%03d:%05d] create_conn_proc start...", tp->tp_tidx + 1, tp_tid);
+			while(cb_lockcompareexchange(tp_this->m_nlockconnexit, 0, 0) == 0)
+			{
+				if(tp_this->GetConnCount() < 100000)
+				{
+					tp_this->CreateConnToServer();
+				}
+				else{
+					cb_sleep(1000);
+				}
+			}
+			tp_this->m_iocpconnthreadexit.del();
+			cb_log(iocpclient_log, "iocp", "iocp_sys", 0, 0, "iocp_client[%03d:%05d] create_conn_proc stop...", tp->tp_tidx + 1, tp_tid);
+			delete tp, tp = 0;
+			return 0;
+		}
+
+		static unsigned int __stdcall send_heartbeat_proc(void* p)
+		{
+			iocp_threadparams* tp = (iocp_threadparams*)p;
+			iocp_client* tp_this  = tp->tp_this; tp_this->m_iocphbthreadexit.add();//thread run + 1, exit - 1
+			unsigned long tp_tid  = GetCurrentThreadId();
+			cb_log(iocpclient_log, "iocp", "iocp_sys", 0, 0, "iocp_client[%03d:%05d] send_heartbeat_proc start...", tp->tp_tidx + 1, tp_tid);
+			while(cb_lockcompareexchange(tp_this->m_nlockhbexit, 0, 0) == 0)
+			{
+				cb_socket Sock = tp_this->GetHBSock();
+				if(Sock != INVALID_SOCKET)
+				{
+					tp_this->SendHeartBeatPackage(Sock);
+				}
+				else{
+					cb_sleep(500);
+				}
+			}
+			tp_this->m_iocphbthreadexit.del();
+			cb_log(iocpclient_log, "iocp", "iocp_sys", 0, 0, "iocp_client[%03d:%05d] send_heartbeat_proc stop...", tp->tp_tidx + 1, tp_tid);
+			delete tp, tp = 0;
+			return 0;
+		}
+
+		static unsigned int __stdcall send_message_proc(void* p)
+		{
+			iocp_threadparams* tp = (iocp_threadparams*)p;
+			iocp_client* tp_this  = tp->tp_this; tp_this->m_iocpsendthreadexit.add();//thread run + 1, exit - 1
+			unsigned long tp_tid  = GetCurrentThreadId();
+			cb_log(iocpclient_log, "iocp", "iocp_sys", 0, 0, "iocp_client[%03d:%05d] send_message_proc start...", tp->tp_tidx + 1, tp_tid);
+			while(cb_lockcompareexchange(tp_this->m_nlocksendexit, 0, 0) == 0)
+			{
+				PDLList pdlinfo = tp_this->pop();
+				if(!pdlinfo) cb_sleep(100);
+
+				cb_socket Sock = pdlinfo->pIOC->_SOCK_;
+				if(Sock != INVALID_SOCKET)
+				{
+					tp_this->SendMsgPackage(Sock);
+				}
+
+				tp_this->push(pdlinfo);
+			}
+			tp_this->m_iocpsendthreadexit.del();
+			cb_log(iocpclient_log, "iocp", "iocp_sys", 0, 0, "iocp_client[%03d:%05d] send_message_proc stop...", tp->tp_tidx + 1, tp_tid);
+			delete tp, tp = 0;
+			return 0;
+		}
+	private:
+		int HandleIOCP(PCLIENT_IO_CONTEXT pIOC, DWORD dwBytes)
+		{
+			switch (pIOC->_IOTYPE_)
+			{
+			case IO_TYPE_CONN:
+				HandleConnect(pIOC);
+				break;
+			case IO_TYPE_RECV:
+				HandleRecv(pIOC, dwBytes);
+				break;
+			case IO_TYPE_SEND:
+				HandleSend(pIOC, dwBytes);
+				break;
+			default:
+				cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client HandleIOCP UNKNOWN IOTYPE[%d]", pIOC->_IOTYPE_);
+				break;
+			}
+			return 0;
+		}
+
+		int HandleConnect(PCLIENT_IO_CONTEXT pIOC)
+		{
+			//int ret = ::setsockopt( sock_, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, 0, 0 ); return (ret != SOCKET_ERROR);
+			PDLList pdllist = m_DLList_Pool.newobj();
+			if(!pdllist)
+			{
+				cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client HandleConnect m_DLList_Pool.newobj(NULL)");
+				cb_closesock(pIOC->_SOCK_);
+				DelIOC(pIOC);
+				return -1;
+			}
+			pdllist->pIOC = pIOC;
+			pIOC->_pdllist_ = pdllist;
+			push(pdllist, false);
+
+			SendHeartBeatPackage(pIOC->_SOCK_);
+			RecvMsgPackage(pIOC->_SOCK_);
+
+			int nRet = m_HeartBeatProcRef.add(pIOC);
+			if(nRet != 0)
+			{
+				cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client HandleConnect m_HeartBeatProcRef.add(%d)", nRet);
+				pIOC->_pdllist_ = 0;
+				pdllist->pIOC = 0;
+				erase(pdllist);
+				m_DLList_Pool.delobj(pdllist);
+				cb_closesock(pIOC->_SOCK_);
+				DelIOC(pIOC);
+			}
+			return 0;
+		}
+
+		int HandleSend(PCLIENT_IO_CONTEXT pIOC, DWORD dwBytes)
+		{
+			if(dwBytes < pIOC->_ndataLen_)
+			{
+				pIOC->_ndataLen_ -= dwBytes;
+				pIOC->_WsaBuf_.len -= dwBytes;
+				memmove(pIOC->_WsaBuf_.buf, &(pIOC->_WsaBuf_.buf[dwBytes]), pIOC->_ndataLen_);
+				
+				DWORD dwSendBytes(0);
+				if(SOCKET_ERROR == WSASend(pIOC->_SOCK_, &pIOC->_WsaBuf_, 1, &dwSendBytes, 0, &pIOC->_OL_, NULL) 
+					&& (WSA_IO_PENDING != WSAGetLastError()))
+				{
+					cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client HandleSend WSASend ERROR[%d]", cb_errno);
+
+					DelIOC(pIOC);
+				}
+			}
+			else{
+				DelIOC(pIOC);
+			}
+			return 0;
+		}
+
+		int HandleRecv(PCLIENT_IO_CONTEXT pIOC, DWORD dwBytes)
+		{
+			if(dwBytes < sizeof(DATA_HEAD))
+			{
+				cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client HandleRecv (%d < sizeof(DATA_HEAD)[%d])", dwBytes, sizeof(DATA_HEAD));
+				DelIOC(pIOC);
+			}
+			int nbodylen = GetBodyLength(pIOC->_WsaBuf_.buf);
+			if(nbodylen > 100000)
+			{
+				cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client HandleRecv (%d max)", nbodylen);
+				DelIOC(pIOC);
+			}
+			
+			cb_log(iocpclient_log, "iocp", "info", 0, 0, "recv msg:%s", pIOC->_WsaBuf_.buf);
+			
+			memset(pIOC->_WsaBuf_.buf, 0, pIOC->_WsaBuf_.len);
+			DWORD dwBytesRecv(0), dwFlags(0);
+			if(SOCKET_ERROR == WSARecv(pIOC->_SOCK_, &pIOC->_WsaBuf_, 1, &dwBytesRecv, &dwFlags, &pIOC->_OL_, NULL) 
+				&& (WSA_IO_PENDING != WSAGetLastError()))
+			{
+				//cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client HandleRecv WSARecv ERROR[%d]", cb_errno);
+
+				DelIOC(pIOC);
+			}
+			return 0;
+		}
+	private:
+		void RecvMsgPackage(cb_socket Sock)
+		{
+			PCLIENT_IO_CONTEXT pIOC = GetIOC(IO_TYPE_SEND, Sock);
+			if(!pIOC) return ;
+
+			DWORD dwBytesRecv(0), dwFlags(0);
+			if(SOCKET_ERROR == WSARecv(pIOC->_SOCK_, &pIOC->_WsaBuf_, 1, &dwBytesRecv, &dwFlags, &pIOC->_OL_, NULL) 
+				&& (WSA_IO_PENDING != WSAGetLastError()))
+			{
+				//cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client RecvMsgPackage WSARecv ERROR[%d]", cb_errno);
+
+				DelIOC(pIOC);
+			}
+		}
+
+		void SendMsgPackage(cb_socket Sock)
+		{
+			char pSendMsg[1024] = {0}; sprintf_s(pSendMsg, sizeof(pSendMsg), "[%d] Hello World!!!", Sock);
+			PCLIENT_IO_CONTEXT pIOC = GetIOC(IO_TYPE_SEND, Sock, sizeof(DATA_HEAD) + strlen(pSendMsg));
+			if(!pIOC) return ;
+
+			memcpy(pIOC->_WsaBuf_.buf, "chbo", 4);
+			SetBodyLength(pIOC->_WsaBuf_.buf, strlen(pSendMsg));
+
+			memcpy(&pIOC->_WsaBuf_.buf[sizeof(DATA_HEAD)], pSendMsg, strlen(pSendMsg));
+
+			DWORD dwBytes(0);
+			if(SOCKET_ERROR == WSASend(pIOC->_SOCK_, &pIOC->_WsaBuf_, 1, &dwBytes, 0, &pIOC->_OL_, NULL) 
+				&& (WSA_IO_PENDING != WSAGetLastError()))
+			{
+				//cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client SendMsgPackage WSASend ERROR[%d]", cb_errno);
+
+				DelIOC(pIOC);
+			}
+		}
+
+		void SendHeartBeatPackage(cb_socket Sock)
+		{
+			PCLIENT_IO_CONTEXT pIOC = GetIOC(IO_TYPE_SEND, Sock, sizeof(DATA_HEAD));
+			if(!pIOC)
+				return ;
+			memcpy(pIOC->_WsaBuf_.buf, "chbo", 4);
+			SetHeartBeatType(pIOC->_WsaBuf_.buf);
+			SetBodyLength(pIOC->_WsaBuf_.buf, 0);
+
+			DWORD dwBytes(0);
+			if(SOCKET_ERROR == WSASend(pIOC->_SOCK_, &pIOC->_WsaBuf_, 1, &dwBytes, 0, &pIOC->_OL_, NULL) 
+				&& (WSA_IO_PENDING != WSAGetLastError()))
+			{
+				cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client SendHeartBeatPackage WSASend ERROR[%d]", cb_errno);
+				
+				DelIOC(pIOC);
+			}
+		}
+
+		void CreateConnToServer(void)
+		{
+			struct sockaddr_in addr;
+			memset(&addr, 0, sizeof(addr));//::ZeroMemory(&addr, sizeof(addr));
+			addr.sin_family		 = AF_INET;
+			addr.sin_addr.s_addr = INADDR_ANY;
+			addr.sin_port		 = 0;
+
+			SOCKET Sock = ::WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED);
+			if(Sock == INVALID_SOCKET)
+			{
+				cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client CreateConnToServer WSASocket ERROR[%d]", cb_errno);
+				return ;
+			}
+
+			PCLIENT_IO_CONTEXT pConnIOC = GetIOC(IO_TYPE_CONN, Sock);
+			if(!pConnIOC)
+			{
+				cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client CreateConnToServer GetIOC(NULL)");
+				cb_closesock(Sock);
+				return ;
+			}
+
+			if(::bind(pConnIOC->_SOCK_, (sockaddr*)&addr, sizeof(addr)) != 0)
+			{
+				cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client CreateConnToServer bind ERROR[%d]", cb_errno);
+				cb_closesock(pConnIOC->_SOCK_);
+				DelIOC(pConnIOC);
+				return ;
+			}
+
+			if(::CreateIoCompletionPort((HANDLE)pConnIOC->_SOCK_, m_hIOCP, 0, 0) == 0)
+			{
+				cb_log(iocpclient_log, "iocp", "err", 0, 0, "CreateConnToServer CreateIoCompletionPort ERROR[%d]", cb_errno);
+				cb_closesock(pConnIOC->_SOCK_);
+				DelIOC(pConnIOC);
+				return ;
+			}
+
+			if(m_lpConnectEx(pConnIOC->_SOCK_, (SOCKADDR*)&m_Remote_Addr, sizeof(m_Remote_Addr), 0, 0, 0, (LPOVERLAPPED)&(pConnIOC->_OL_)) == FALSE 
+				&& WSAGetLastError() != ERROR_IO_PENDING)
+			{
+				cb_log(iocpclient_log, "iocp", "err", 0, 0, "iocp_client CreateConnToServer LPFN_CONNECTEX(FALSE)[%d]", cb_errno);
+				cb_closesock(pConnIOC->_SOCK_);
+				DelIOC(pConnIOC);
+				return ;
+			}
+		}
+
+		PCLIENT_IO_CONTEXT GetIOC(CLIENT_IO_TYPE _IO_Type, cb_socket Sock, int size = 8 * 1024)
+		{
+			PCLIENT_IO_CONTEXT pIOC = m_IOC_Pool.newobj();
+			if(!pIOC)
+			{
+				int isize = sizeof(CLIENT_IO_CONTEXT) + __mem_pool_offset__;
+				if(!(pIOC = (PCLIENT_IO_CONTEXT)new char[isize])){
+					return 0;
+				}
+				memset(pIOC, 0, isize);
+				pIOC = (PCLIENT_IO_CONTEXT)((char*)pIOC + __mem_pool_offset__);
+			}
+			else{
+				memset(pIOC, 0, sizeof(CLIENT_IO_CONTEXT));
+			}
+			pIOC->_WsaBuf_.buf = (char*)m_MemPool.mcb_pool_new(size);
+			if(!pIOC->_WsaBuf_.buf)
+			{
+				int isize = size + __mem_pool_offset__;
+				pIOC->_WsaBuf_.buf = new char[isize];
+				if(!pIOC->_WsaBuf_.buf)
+				{
+					m_IOC_Pool.delobj(pIOC);
+					return 0;
+				}
+				memset(pIOC->_WsaBuf_.buf, 0, isize);
+				pIOC->_WsaBuf_.buf += __mem_pool_offset__;
+			}
+			else{
+				memset(pIOC->_WsaBuf_.buf, 0, size);
+			}
+			pIOC->_IOTYPE_	   = _IO_Type;
+			pIOC->_SOCK_	   = Sock;
+			pIOC->_WsaBuf_.len = size;
+
+			return pIOC;
+		}
+
+		void DelIOC(PCLIENT_IO_CONTEXT pIOC)
+		{
+			if(pIOC)
+			{
+				if(pIOC->_WsaBuf_.buf)
+				{
+					m_MemPool.mcb_pool_del(pIOC->_WsaBuf_.buf); pIOC->_WsaBuf_.buf = 0;
+				}
+				m_IOC_Pool.delobj(pIOC);
+			}
+		}
+
+		inline DWORD GetConnCount(void) { return getdllistcount(); }
+	private:
+		HANDLE				m_hIOCP;
+		LPFN_CONNECTEX		m_lpConnectEx;
+		struct sockaddr_in	m_Remote_Addr;
+
+		__cb_class__		m_HeartBeatProcRef;
+
+		cb_space_memorypool::mem_pool m_MemPool;
+		cb_space_memorypool::obj_pool<DLList> m_DLList_Pool;
+		cb_space_memorypool::obj_pool<CLIENT_IO_CONTEXT> m_IOC_Pool;
 
 	};
 #endif
