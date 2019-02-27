@@ -4856,6 +4856,7 @@ FORCE_INLINE void* iocp_log(void* p){ cb_log.writelog((char*)p);return 0; }
 
 #define __IOCP_DEGUB__
 #define __MAX_BODYLEN__ 1024 * 1024 * 4/* 4M */
+#define __MAX_HBLEN__ 32
 
 namespace cb_space_server
 {
@@ -5539,26 +5540,31 @@ namespace cb_space_server
 			PSOCK_CONTEXT pSockC = (PSOCK_CONTEXT)p;
 			pSockC->lock();
 #ifdef __IOCP_DEGUB__
-			cb_log(iocp_log, "iocp", "info", 0, 0, "TMCS [%d] ...", pSockC->_SockC_Socket_);
+			//cb_log(iocp_log, "iocp", "info", 0, 0, "TM [%d] ...", pSockC->_SockC_Socket_);
 #endif
 			if(pSockC->_IOC_Count_ > 0)
 			{
-				//重用socket
-				SOCKET Sock = pSockC->_SockC_Socket_; pSockC->_SockC_Socket_ = INVALID_SOCKET;
+				if(pSockC->_SockC_Socket_ != INVALID_SOCKET)
+				{
+					//重用socket
+					SOCKET Sock = pSockC->_SockC_Socket_; pSockC->_SockC_Socket_ = INVALID_SOCKET;
 
-				LINGER lingerStruct; lingerStruct.l_onoff = 1; lingerStruct.l_linger = 0;
-				setsockopt(Sock, SOL_SOCKET, SO_LINGER, (char*)&lingerStruct, sizeof(lingerStruct));
-				CancelIo((HANDLE)Sock);
+					LINGER lingerStruct; lingerStruct.l_onoff = 1; lingerStruct.l_linger = 0;
+					setsockopt(Sock, SOL_SOCKET, SO_LINGER, (char*)&lingerStruct, sizeof(lingerStruct));
+					CancelIo((HANDLE)Sock);
 
-				cb_closesock(Sock);
-
+					cb_closesock(Sock);
+				}
 				pSockC->unlock();
 			}
 			else{
-				//重用socket
-				SOCKET Sock = pSockC->_SockC_Socket_; pSockC->_SockC_Socket_ = INVALID_SOCKET;
+				if(pSockC->_SockC_Socket_ != INVALID_SOCKET)
+				{
+					//重用socket
+					SOCKET Sock = pSockC->_SockC_Socket_; pSockC->_SockC_Socket_ = INVALID_SOCKET;
 
-				cb_closesock(Sock);
+					cb_closesock(Sock);
+				}
 
 				pSockC->unlock();
 				DelSockC(pSockC);//删除不需要解锁(pSockC->unlock();),没有意义
@@ -5962,10 +5968,10 @@ _continue_business_:
 					if(IsHeartBeat(pIOC->_IOBuf_.buf))
 					{
 						int iRet(0);
-						if((iRet = m_HeartBeatProcRef.exchange_hb(pSockC)) != 0)
+						if(_nBodyLen > __MAX_HBLEN__ || (iRet = m_HeartBeatProcRef.exchange_hb(pSockC)) != 0)
 						{
 #ifdef __IOCP_DEGUB__
-							cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv Error(exchange_hb) [%d][%d]", iRet, pSockC->_SockC_Socket_);
+							cb_log(iocp_log, "iocp", "err", 0, 0, "HandleFirstRecv Error(exchange_hb) [%d][%d][%d]", iRet, pSockC->_SockC_Socket_, _nBodyLen);
 #endif
 							m_HeartBeatProcRef.del(pSockC);
 							CloseSockSession(pSockC, pIOC);
@@ -6108,10 +6114,10 @@ _continue_business2_:
 							if(IsHeartBeat(pIOC->_IOBuf_.buf))
 							{
 								int iRet(0);
-								if((iRet = m_HeartBeatProcRef.exchange_hb(pSockC)) != 0)
+								if(_nBodyLen > __MAX_HBLEN__ || (iRet = m_HeartBeatProcRef.exchange_hb(pSockC)) != 0)
 								{
 #ifdef __IOCP_DEGUB__
-									cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv Error(exchange_hb) [%d][%d]", iRet, pSockC->_SockC_Socket_);
+									cb_log(iocp_log, "iocp", "err", 0, 0, "HandleRecv Error(exchange_hb) [%d][%d][%d]", iRet, pSockC->_SockC_Socket_, _nBodyLen);
 #endif
 									m_HeartBeatProcRef.del(pSockC);
 									CloseSockSession(pSockC, pIOC);
